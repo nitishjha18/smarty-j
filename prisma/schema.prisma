@@ -12,3 +12,5 @@ datasource db {
   url = env("DATABASE_URL")
   url = env("DIRECT_URL")
 }
+//Database Pointers
+//Setup of table+ for db visualization
