@@ -8,13 +8,23 @@ datasource db {
   url = env("DIRECT_URL")
 }
 
+
+// User — stores user info, target role, resume URL
+// Application — the core table, one row per job applied to
+// StatusHistory — every time status changes, log it (this powers the timeline)
+// AIInterview — stores AI generated questions + user's saved answers
+// Reminder — follow up reminder date per application
+// Account — needed by NextAuth for Google OAuth (auto required)
+// Session — needed by NextAuth for session management (auto required)
+
+
 model User {
 id      String @id @default(cuid())
-name            String 
-email           String @unique
-profilePicture  String?
+name String 
+email String @unique
+profilePicture String?
 experienceLevel String
-resumeUrl       String?
+resumeUrl String?
 createdAccountAt DateTime @default(now())
 updatedAt DateTime @updatedAt
 accounts Account[]
@@ -22,12 +32,12 @@ sessions Session[]
 }
 
 model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
+  id String  @id @default(cuid())
+  userId String
+  type String
+  provider String
   providerAccountId String
-  refresh_token     String? @db.Text
+  refresh_token  String? @db.Text
   access_token      String? @db.Text
   expires_at        Int?
   token_type        String?
@@ -47,4 +57,22 @@ model Session {
   expires      DateTime
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  ASSIGNMENT
+  OFFER
+  REJECTED
+}
+
+enum ApplicationSource {
+  LINKED_IN
+  NAUKARI
+  REFERAL
+  COLDEMAIL
+  SOCIAL_MEDIA
+  OTHER_JOB_APPS
 }
