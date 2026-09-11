@@ -1,129 +1,110 @@
 # Dashboard Module
 
-## Purpose
+Status: Built — UI redesign pending
+Last updated: September 2026
 
-The dashboard is the first page a user sees after signing in. It is designed as a morning briefing — not a data dump. The goal is to give the user progress and clarity in under 5 seconds. Every design and data decision on this page is made with that constraint in mind.
+## 1. Module Overview
 
-Target users range from freshers tracking 50-100+ applications who need a war-room style overview, to professionals tracking 10-20 applications who want a calmer progress view. The dashboard serves both without compromising either.
+The dashboard is the first page after sign-in and is designed as a morning briefing rather than a data dump: it gives the user progress and clarity in under five seconds through a personal greeting, a concise status summary, pipeline counts, stale applications, and recent status activity.
 
 ---
 
-## Location
+## 2. Backend API Contract
 
+Both endpoints require `Authorization: Bearer <token>`. Call `getToken()` fresh before requesting them. Missing or invalid tokens return `401 { "error": "Unauthorized" }`; a valid Clerk token with no local user returns `401 { "error": "User not found. Please sync first." }`.
+
+### GET /api/dashboard/stats
+
+No request body.
+
+Response `200`:
+
+```json
+{
+  "stats": {
+    "totalApplications": 12,
+    "responseRate": 33,
+    "rejectionRate": 25,
+    "bestSource": "LINKED_IN",
+    "staleApplications": 3
+  }
+}
 ```
+
+| Field | Meaning |
+|---|---|
+| `totalApplications` | Total application count |
+| `responseRate` | Integer percentage of applications that moved past `APPLIED` |
+| `rejectionRate` | Integer percentage of applications with `REJECTED` status |
+| `bestSource` | `ApplicationSource` value with the most non-`APPLIED` responses, or `null` |
+| `staleApplications` | Applications still in `APPLIED` after 14 or more days |
+
+Unexpected failures return `500 { "error": "Internal server error" }`.
+
+### GET /api/applications
+
+This dashboard call fetches the complete list for client-side derivations. It has no request body. The backend orders records by `dateApplied` descending and includes status history.
+
+Response `200`:
+
+```json
+{
+  "applications": [
+    {
+      "id": "...",
+      "userId": "...",
+      "companyName": "Google",
+      "jobTitle": "Backend Engineer",
+      "jobDescription": "...",
+      "status": "APPLIED",
+      "source": "LINKED_IN",
+      "dateApplied": "2026-08-20T00:00:00.000Z",
+      "notes": "...",
+      "createdAt": "...",
+      "updatedAt": "...",
+      "statusHistory": [
+        {
+          "id": "...",
+          "applicationId": "...",
+          "status": "APPLIED",
+          "createdAt": "..."
+        }
+      ]
+    }
+  ]
+}
+```
+
+Unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message.
+
+---
+
+## 3. Page Location and Auth Flow
+
+```text
 app/(protected)/dashboard/page.tsx
 ```
 
----
-
-## Sections
-
-The dashboard has five sections rendered in this exact order. The order is intentional — it moves from personal to analytical, from emotional to actionable.
-
-### 1. Greeting
-
-A personalized welcome using the user's first name pulled from Clerk's `useUser` hook. Followed by a static subline: "Here's your job search status for today."
-
-The name comes from `user?.firstName` with a fallback to the first word of `user?.fullName` and a final fallback to "there" if neither is available.
-
-This section exists because landing on a dashboard that immediately shows numbers feels clinical. The greeting creates a moment of acknowledgment before the data hits.
-
-### 2. Motivational Quote
-
-A single hardcoded quote with a left border accent. Currently static — one quote shown every time.
-
-```
-"Success is the sum of small efforts, repeated day in and day out."
-— Robert Collier
-```
-
-Intentionally kept simple. The quote is not fetched from an API, not randomized per session, and not user-configurable. It exists to set a positive tone for the morning briefing. Rotating quotes or user-selected quotes are a polish-phase decision, not a functional requirement.
-
-### 3. Morning Brief Sentence
-
-A single dynamically generated sentence summarizing the user's current state. Rendered below a horizontal divider that separates the personal top section from the data section.
-
-Format:
-```
-You have {totalApplications} applications tracked — {staleCount} has/have had no update in 14+ days.
-```
-
-`totalApplications` comes from the stats endpoint. `staleCount` is derived client-side from the applications list. See Data Sources section for details.
-
-### 4. Pipeline Strip
-
-A horizontal strip showing application counts per active status stage. Stages shown left to right:
-
-```
-Applied → Screening → Interview → Assignment → Offer
-```
-
-REJECTED is intentionally excluded from the pipeline strip. Rejected applications are a terminal state and showing them in the pipeline creates a demoralizing read. They are not hidden from the product — they appear in the applications list and detail page — but they have no place in a morning briefing.
-
-Counts are derived entirely client-side by filtering the applications array by status. Stages with zero applications render the count in a lighter gray to reduce visual noise. Stages with applications render in full dark.
-
-### 5. Bottom Two Columns
-
-Two equal-width cards sitting side by side.
-
-**Left — Needs Attention**
-
-Shows applications that have been in APPLIED status for 14 or more days with no status change. Each row shows company name, job title, and the number of days since application.
-
-This is computed client-side by filtering applications where `status === "APPLIED"` and `dateApplied` is 14+ days ago. The backend stats endpoint returns a `staleApplications` count but not the actual application records — so the client computes this itself from the full applications list.
-
-The "14 days" threshold matches the backend's definition of stale used in `GET /api/dashboard/stats`.
-
-**Right — Recent Activity**
-
-Shows the last 5 status changes across all applications, sorted by most recent first.
-
-Computed client-side by flattening all `statusHistory` arrays from every application into a single array, sorting by `createdAt` descending, and slicing the first 5 entries. Each entry shows company name, the status it moved to, and a human-readable time ago string (Today, Yesterday, or N days ago).
+The page uses `useAuth()` for `getToken` and `useUser()` for the greeting name. On mount, it gets a token, calls `syncUser(token)` to ensure the local user row exists, then fetches the dashboard data. If no token is available, the request returns early; Clerk route protection handles the sign-in redirect.
 
 ---
 
-## Data Sources
+## 4. Data Sources and Client-Side Derivations
 
-The dashboard makes two API calls in parallel on mount using `Promise.all`. Neither call waits for the other.
+After `syncUser(token)` resolves, fetch the two data sources in parallel:
 
 ```ts
 const [statsData, appsData] = await Promise.all([
   getDashboardStats(token),
   getApplications(token),
 ])
+setStats(statsData.stats)
+setApplications(appsData.applications)
 ```
 
-### GET /api/dashboard/stats
+`totalApplications` is used in the morning brief. The page fetches `responseRate`, `rejectionRate`, `bestSource`, and `staleApplications` but does not display them. It derives the pipeline, stale records, and recent activity from `applications`.
 
-Returns pre-computed server-side aggregations:
-
-| Field | Type | Used on dashboard |
-|---|---|---|
-| totalApplications | number | Morning brief sentence |
-| responseRate | number | Not shown on dashboard |
-| rejectionRate | number | Not shown on dashboard |
-| bestSource | string or null | Not shown on dashboard |
-| staleApplications | number | Not shown directly — client recomputes from apps list |
-
-Note: `responseRate`, `rejectionRate`, and `bestSource` are fetched but not displayed on the dashboard. They are reserved for a future Analytics page. The stats endpoint is called anyway because `totalApplications` is needed and the cost of the call is the same regardless.
-
-### GET /api/applications
-
-Returns the full application list with `statusHistory` embedded in each application object. This is the heavier of the two calls but necessary because:
-
-- Pipeline strip counts require filtering by status across all applications
-- Recent activity requires access to `statusHistory` on every application
-- Needs attention requires filtering by `dateApplied` and `status`
-
-All three of these derivations are done client-side in 3-4 lines of JavaScript each. At 50-100 applications per user this is negligible processing cost.
-
----
-
-## Client-Side Derivations
-
-All three of the following are computed inside the component after both API calls resolve.
-
-### Pipeline Counts
+### Pipeline counts
 
 ```ts
 const pipelineCounts = PIPELINE_STAGES.reduce((acc, stage) => {
@@ -132,7 +113,19 @@ const pipelineCounts = PIPELINE_STAGES.reduce((acc, stage) => {
 }, {} as Record<string, number>)
 ```
 
-### Stale Applications
+`PIPELINE_STAGES` is:
+
+```ts
+const PIPELINE_STAGES: ApplicationStatus[] = [
+  "APPLIED",
+  "SCREENING",
+  "INTERVIEW",
+  "ASSIGNMENT",
+  "OFFER",
+]
+```
+
+### Stale applications
 
 ```ts
 const staleApps = applications.filter((app) => {
@@ -144,7 +137,7 @@ const staleApps = applications.filter((app) => {
 })
 ```
 
-### Recent Activity Feed
+### Recent activity feed
 
 ```ts
 const recentActivity = applications
@@ -161,9 +154,62 @@ const recentActivity = applications
 
 ---
 
-## State Management
+## 5. Sections in Render Order
 
-No global state. No caching layer. Plain React.
+### Greeting
+
+Render `Hello, {firstName}` and the static subline `Here's your job search status for today.`. Resolve `firstName` in this order:
+
+```ts
+const firstName = user?.firstName || user?.fullName?.split(" ")[0] || "there"
+```
+
+### Motivational quote
+
+Render one static, left-border-accented quote:
+
+```text
+"Success is the sum of small efforts, repeated day in and day out."
+— Robert Collier
+```
+
+### Morning brief sentence
+
+Render the current date above this format:
+
+```text
+You have {totalApplications} applications tracked — {staleCount} has/have had no update in 14+ days.
+```
+
+`totalApplications` comes from `stats?.totalApplications ?? 0`; `staleCount` is `staleApps.length`. Use `has` when the count is one, otherwise `have`.
+
+### Pipeline strip
+
+Render a horizontal strip in this order: `APPLIED → SCREENING → INTERVIEW → ASSIGNMENT → OFFER`. Each stage displays its count and label. A zero count uses lighter gray; a nonzero count uses full dark text.
+
+`REJECTED` is excluded by design because it is a terminal state and does not belong in the morning briefing, though it remains visible in applications pages.
+
+### Needs Attention
+
+Render `staleApps` in the left card. Each row shows company name, job title, and the calculated number of days since `dateApplied`. The empty state is `All applications are active.`.
+
+### Recent Activity
+
+Render `recentActivity` in the right card. Each entry shows the company name, the status it moved to, and `timeAgo(entry.createdAt)`. The empty state is `No activity yet.`.
+
+```ts
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+  if (days === 0) return "Today"
+  if (days === 1) return "Yesterday"
+  return `${days} days ago`
+}
+```
+
+---
+
+## 6. State Variables
 
 ```ts
 const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -172,28 +218,20 @@ const [loading, setLoading] = useState(true)
 const [error, setError] = useState<string | null>(null)
 ```
 
-The dashboard fetches its own fresh copy of applications on every mount. It does not share state with the applications list page. This is intentional — the dashboard is a read-only snapshot, not a live synchronized view.
+There is no global state or caching layer. The dashboard fetches a fresh application snapshot on every mount and does not share it with the applications list page.
 
 ---
 
-## Auth Flow
+## 7. Loading and Error States
 
-1. `useAuth` provides `getToken` for bearer token
-2. `useUser` provides user name for the greeting
-3. `syncUser` is called before the parallel data fetch to ensure the user exists in the local database
-4. If token is unavailable the fetch returns early silently — Clerk middleware handles the redirect to sign-in
-
----
-
-## Loading and Error States
-
-- While loading: pipeline counts show "—", brief sentence shows "Loading your status..."
-- On error: error message from the API is shown in the brief sentence area in red
-- Empty states: "All applications are active" in needs attention, "No activity yet" in recent activity
+- While loading, pipeline counts show `—`, the morning brief shows `Loading your status...`, and both bottom cards show `Loading...`.
+- On error, render the API error message in red in the morning brief area.
+- Needs Attention has the empty state `All applications are active.`.
+- Recent Activity has the empty state `No activity yet.`.
 
 ---
 
-## What Is Deliberately Not On This Page
+## 8. What Is Deliberately Not Here
 
 These items were considered and explicitly excluded:
 
@@ -207,20 +245,9 @@ These items were considered and explicitly excluded:
 
 ---
 
-## Known Limitations
+## 9. Known Limitations
 
 - Recent activity "Today" label applies to all entries from the current calendar day regardless of time — a status changed at 11pm and one at 1am both show "Today"
 - Stale threshold is hardcoded to 14 days on the client to match the backend definition — if the backend threshold changes the client must be updated manually
 - Motivational quote is static — rotating quotes is a polish-phase feature
 - Pipeline strip does not include REJECTED — users cannot see rejection count from the dashboard
-
----
-
-## Future Considerations (Polish Phase)
-
-- Rotating motivational quotes from a curated list
-- Clicking a pipeline stage navigates to applications list filtered by that status
-- Clicking a stale application row navigates to its detail page
-- Clicking a recent activity row navigates to its detail page
-- Response rate shown as a secondary metric below the brief sentence
-- Animation on pipeline count numbers on first load

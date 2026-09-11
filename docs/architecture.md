@@ -64,6 +64,25 @@ Express REST API (Node.js)
 
 ---
 
+## 2b. Frontend Architecture
+
+Layout: protected routes wrapped in `app/(protected)/layout.tsx` which calls `syncUser` on mount and guards with `isLoaded`/`isSignedIn` from Clerk.
+
+State management: plain React useState/useEffect per page. No global state, no caching layer. Each page fetches its own data on mount. The dashboard uses Promise.all for parallel fetches.
+
+API calls: all calls go through `frontend/lib/api.ts`. No page makes raw fetch calls directly. Resume upload bypasses apiFetch and uses raw fetch with FormData — do not set Content-Type manually.
+
+Auth: `useAuth()` provides `getToken()`. Always call fresh before each request — Clerk caches internally. `useUser()` provides user display name for the greeting.
+
+Component structure:
+- `components/Sidebar.tsx` — shared across all protected pages via the protected layout
+- All pages are client components (`"use client"`)
+- No server components in use currently
+
+Design system: #FF6B35 electric orange as brand color. Inter font. Light mode only. Full token set in `docs/context.md` Section 6.
+
+---
+
 ## 3. Database Design
 
 ### Schema
@@ -395,11 +414,15 @@ ApplynTrack stores and analyzes resumes but does not generate or edit them. A re
 
 The application is a monolith by design. At the current scale, the operational overhead of microservices would cost more than the benefits gained.
 
+### UI Polish Phase (Current)
+
+The frontend is functional end-to-end. The current phase applies a consistent design system across all pages. Brand color is #FF6B35. Pages are redesigned one at a time, orchestrated from a dedicated design session. Each page is documented in `docs/modules/` after redesign is built and tested.
+
 ---
 
 ## 11. Known Technical Debt
 
-**Deprecated Clerk middleware**
+**Deprecated Clerk middleware** [Highest priority debt before production deployment]
 `requireAuth()` from `@clerk/express` is used in `middleware/auth.ts`. Clerk's SDK has deprecated this in favor of `clerkMiddleware()` with `getAuth()`. The deprecation warning prints on every server start. The application continues to work but will break when the next major Clerk version removes `requireAuth`.
 
 **No global error handler**
@@ -419,6 +442,3 @@ NAUKARI, REFERAL, and COLDEMAIL are misspelled in the initial migration. Correct
 
 **pdf2json text traversal**
 The PDF text extraction uses a manual traversal of `pdfData.Pages[].Texts[].R[]` because `getRawTextContent()` returned empty strings. This is a workaround for an undocumented behavior of pdf2json and may break on different PDF structures.
-
-**Bearer token display in dashboard**
-`frontend/app/dashboard/page.tsx` includes a token display component used for Postman testing during development. This must be removed before any public deployment.

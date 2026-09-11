@@ -1,17 +1,102 @@
 # ApplynTrack — Profile Module
 
-## Purpose
+Status: Built — UI redesign pending
+Last updated: September 2026
 
-The profile page gives the user two things:
+## 1. Module Overview
 
-1. Control over their account information.
-2. The ability to upload the resume that powers AI features across the product.
-
-It is a utility page — not visited daily, but critical to visit at least once before AI resume analysis will work.
+The profile page lets a user update their local profile and upload the single resume used by Resume Analysis across applications; it is a utility page, but an uploaded resume is required before Resume Analysis can work.
 
 ---
 
-## Location
+## 2. Backend API Contract
+
+All routes require `Authorization: Bearer <token>`. Get a fresh token with `const token = await getToken()` before each call. Do not send a `userId`; the backend derives it from the validated Clerk token.
+
+### User response shape
+
+The user object returned by profile endpoints has this shape:
+
+```json
+{
+  "id": "cmp07oqw40000r9w593fvr195",
+  "clerkId": "user_3DXzII2iaUCBA70MGr62tfNIGzG",
+  "name": "Nitish Jha",
+  "email": "nitish11jha@gmail.com",
+  "profilePicture": "https://img.clerk.com/...",
+  "targetRole": "Backend Developer",
+  "experienceLevel": "Fresher",
+  "resumeUrl": "https://...supabase.co/storage/v1/object/public/resumes/.../resume.pdf",
+  "resumeText": "Full extracted text of the resume...",
+  "createdAt": "2026-05-10T20:14:40.420Z",
+  "updatedAt": "2026-08-18T11:39:26.856Z"
+}
+```
+
+### GET /api/user/profile
+
+No request body.
+
+Response `200`:
+
+```json
+{ "user": { "id": "...", "clerkId": "...", "name": "...", "email": "...", "profilePicture": "...", "targetRole": "...", "experienceLevel": "...", "resumeUrl": "...", "resumeText": "...", "createdAt": "...", "updatedAt": "..." } }
+```
+
+Errors: missing or invalid token returns `401 { "error": "Unauthorized" }`; no local user returns `404 { "error": "User not found" }`; unexpected failures return `500 { "error": "Internal server error" }`.
+
+### PUT /api/user/profile
+
+All request fields are optional.
+
+```json
+{
+  "name": "Nitish Jha",
+  "targetRole": "Backend Developer",
+  "experienceLevel": "Fresher"
+}
+```
+
+Response `200`:
+
+```json
+{ "user": { "id": "...", "clerkId": "...", "name": "...", "email": "...", "profilePicture": "...", "targetRole": "...", "experienceLevel": "...", "resumeUrl": "...", "resumeText": "...", "createdAt": "...", "updatedAt": "..." } }
+```
+
+Errors: missing or invalid token returns `401 { "error": "Unauthorized" }`; a valid Clerk token without a local user returns `401 { "error": "User not found. Please sync first." }`; unexpected failures return `500 { "error": "Internal server error" }`.
+
+### POST /api/user/resume
+
+Send multipart form data. The field name must be `resume`, and only PDF files are accepted.
+
+```ts
+const formData = new FormData()
+formData.append("resume", file)
+
+fetch(`${API_URL}/api/user/resume`, {
+  method: "POST",
+  headers: { "Authorization": `Bearer ${token}` },
+  body: formData,
+})
+```
+
+Do **not** set `Content-Type` manually. The browser sets `multipart/form-data` with the required boundary. This request intentionally bypasses the JSON `apiFetch` helper and uses raw `fetch` through `uploadResume`.
+
+Response `200`:
+
+```json
+{
+  "message": "Resume uploaded successfully",
+  "resumeUrl": "https://...supabase.co/storage/v1/object/public/resumes/.../resume.pdf",
+  "resumeText": "Extracted text content of the PDF..."
+}
+```
+
+Errors: `400 { "error": "No file uploaded" }`; `400 { "error": "Only PDF files are allowed" }`; `500 { "error": "Failed to upload to storage" }`; unexpected failures return `500 { "error": "Internal server error" }`.
+
+---
+
+## 3. Page Location
 
 ```text
 app/(protected)/profile/page.tsx
@@ -19,108 +104,59 @@ app/(protected)/profile/page.tsx
 
 ---
 
-## Sections
+## 4. Sections in Render Order
 
-The page has two sections rendered top to bottom, separated by a horizontal divider.
+### Profile section
 
-### 1. Profile Section
+The profile section renders `name`, `targetRole`, and `experienceLevel` text inputs. `GET /api/user/profile` loads them on mount. `name` has a value from Clerk user creation; for new users, `targetRole` and `experienceLevel` can be `null`, so initialize them with `?? ""`.
 
-Displays and allows editing of three fields:
+The Save button calls `PUT /api/user/profile` with the current three fields.
 
-| Field | Type | Placeholder |
-|---|---|---|
-| `name` | Text input | — |
-| `targetRole` | Text input | e.g. Backend Engineer |
-| `experienceLevel` | Text input | e.g. Fresher |
+- On success, update the profile state in place and show `Profile saved.` below the button.
+- On failure, render the API error message in red below the button.
 
-All three fields pre-fill from `GET /api/user/profile` on mount.
+### Resume section
 
-The `name` field will always have a value since it comes from Clerk on user creation. `targetRole` and `experienceLevel` may be `null` for new users — they default to an empty string via `?? ""`.
-
-The **Save** button calls `PUT /api/user/profile` with the current field values.
-
-- On success, the profile state updates in place.
-- A **"Profile saved."** confirmation appears below the button.
-- On error, the error message from the API appears in red.
-
-### 2. Resume Section
-
-The resume section is the most critical section on this page.
-
-The resume stored here is the input for AI resume analysis on every application. If no resume is uploaded, the **Analyze Resume** feature on the application detail page will return a `400` error.
-
-There are two distinct visual states.
+The resume stored here is the input to Resume Analysis for every application.
 
 #### No Resume Uploaded
 
-Display:
+Render a dashed, muted-text card with:
 
-- A dashed bordered card with muted text:
-  - **"No resume uploaded yet."**
-- Secondary line:
-  - **"Upload a resume to unlock AI resume analysis on your applications."**
-- File picker and **Upload** button below.
+- `No resume uploaded yet.`
+- `Upload a resume to unlock AI resume analysis on your applications.`
+- A file picker and `Upload` button.
+
+The empty-state border color is `#E5E7EB`.
 
 #### Resume Uploaded
 
-Display:
+Render a green-bordered card with a checkmark rendered as text (`✓`) and:
 
-- A green bordered card with a checkmark:
-  - **"Resume uploaded"**
-- **"View current resume"** link opening the Supabase URL in a new tab.
-- File picker labeled **"Replace resume"**.
-- **Upload** button below.
+- `Resume uploaded`
+- A `View current resume` link that opens the Supabase URL in a new tab
+- A file picker labelled `Replace resume`
+- An `Upload` button
 
-The replace flow is identical to the initial upload — the backend overwrites the existing file and returns the new URL.
+Replacing is the same upload flow; the backend overwrites the user's existing `resume.pdf` and returns the new URL.
 
----
+#### Client-side validation and successful upload
 
-## API Calls
+Before calling the API:
 
-| Action | Endpoint | When |
-|---|---|---|
-| Load profile | `GET /api/user/profile` | On mount |
-| Save profile | `PUT /api/user/profile` | On save button click |
-| Upload resume | `POST /api/user/resume` | On upload button click |
+1. When no file is selected, show `Please select a PDF file.` and return.
+2. When `selectedFile.type !== "application/pdf"`, show `Only PDF files are allowed.` and return.
 
----
+On success, use the `POST /api/user/resume` response to:
 
-## Resume Upload Flow
-
-Resume upload is handled differently from all other API calls on this page.
-
-It uses `FormData` instead of JSON and bypasses `apiFetch` entirely — calling `uploadResume` from `lib/api.ts`, which uses raw `fetch` without a manually set `Content-Type` header.
-
-The browser sets the `Content-Type` header automatically with the correct multipart boundary.
-
-### Client-Side Validation
-
-Validation runs before the API call:
-
-1. If no file is selected:
-   - Show **"Please select a PDF file."**
-   - Return early.
-2. If the selected file's `type !== "application/pdf"`:
-   - Show **"Only PDF files are allowed."**
-   - Return early.
-
-### Successful Upload
-
-On success, the response includes:
-
-- `resumeUrl`
-- `resumeText`
-
-The component:
-
-1. Updates `profile.resumeUrl` in state immediately.
-2. Does not perform a full re-fetch.
-3. Resets `selectedFile` to `null`.
-4. Shows **"Resume uploaded successfully."**
+1. Update `profile.resumeUrl` in state immediately.
+2. Avoid a full profile re-fetch.
+3. Set `selectedFile` to `null`.
+4. Show `Resume uploaded successfully.`.
 
 ---
 
-## State Variables
+## 5. State Variables
 
 ```ts
 const [profile, setProfile] = useState<User | null>(null)
@@ -140,13 +176,11 @@ const [uploadError, setUploadError] = useState<string | null>(null)
 const [uploadSuccess, setUploadSuccess] = useState(false)
 ```
 
-Each async operation has its own loading boolean and error string.
-
-Profile save and resume upload can fail or succeed independently without state bleeding between them.
+Each operation has its own loading boolean and error string, so profile saving and resume uploading can succeed or fail independently.
 
 ---
 
-## Loading and Error States
+## 6. Loading and Error States
 
 | State | What to show |
 |---|---|
@@ -161,10 +195,6 @@ Profile save and resume upload can fail or succeed independently without state b
 | Upload in progress | Upload button shows **"Uploading..."**, disabled |
 | Upload success | **"Resume uploaded successfully."** in green; `resumeUrl` updates in place |
 | Upload error | Error message in red below the upload button |
-
----
-
-## Known Fix
 
 `getToken` is added to the `useEffect` dependency array with a null guard.
 
@@ -184,7 +214,7 @@ useEffect(() => {
 
 ---
 
-## What Is Deliberately Not On This Page
+## 7. What Is Deliberately Not Here
 
 | Item | Reason excluded |
 |---|---|
@@ -196,13 +226,6 @@ useEffect(() => {
 
 ---
 
-## Future Considerations (Polish Phase)
+## 8. Known Limitations
 
-- Show resume filename after upload instead of just the generic link text.
-- Show upload date of the current resume.
-- Add a drag-and-drop file upload zone instead of the native file picker.
-- Change `experienceLevel` to a dropdown:
-  - Fresher
-  - 0–1 years
-  - 1–3 years
-  instead of free text.
+No known limitations are documented for this page.
