@@ -6,15 +6,6 @@ import { useRouter } from "next/navigation"
 import { getApplications } from "../../lib/api"
 import { Application, ApplicationStatus, ApplicationSource } from "../../types"
 
-const STATUS_STYLES: Record<ApplicationStatus, string> = {
-  APPLIED: "bg-blue-50 text-blue-700",
-  SCREENING: "bg-yellow-50 text-yellow-700",
-  INTERVIEW: "bg-purple-50 text-purple-700",
-  ASSIGNMENT: "bg-orange-50 text-orange-700",
-  OFFER: "bg-green-50 text-green-700",
-  REJECTED: "bg-red-50 text-red-700",
-}
-
 const STATUS_LABELS: Record<ApplicationStatus, string> = {
   APPLIED: "Applied",
   SCREENING: "Screening",
@@ -32,6 +23,26 @@ const SOURCE_LABELS: Record<ApplicationSource, string> = {
   SOCIAL_MEDIA: "Social Media",
   OTHER_JOB_APPS: "Other",
 }
+
+const STATUS_COLORS: Record<ApplicationStatus, string> = {
+  APPLIED: "#1D4ED8",
+  SCREENING: "#92400E",
+  INTERVIEW: "#6D28D9",
+  ASSIGNMENT: "#C2410C",
+  OFFER: "#15803D",
+  REJECTED: "#9F1239",
+}
+
+const STATUS_ORDER: ApplicationStatus[] = [
+  "APPLIED",
+  "SCREENING",
+  "INTERVIEW",
+  "ASSIGNMENT",
+  "OFFER",
+  "REJECTED",
+]
+
+const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("en-IN", {
@@ -64,81 +75,159 @@ export default function ApplicationsPage() {
     fetch()
   }, [])
 
+  const columns = STATUS_ORDER.map((status) => ({
+    status,
+    items: applications.filter((app) => app.status === status),
+  }))
+
+  const staleCount = applications.filter(
+    (app) =>
+      app.status === "APPLIED" &&
+      Date.now() - new Date(app.dateApplied).getTime() >= STALE_THRESHOLD_MS
+  ).length
+
+  const subtitle = loading
+    ? "Loading your applications..."
+    : error
+    ? ""
+    : applications.length === 0
+    ? "Your pipeline is empty."
+    : `${applications.length} ${applications.length === 1 ? "application" : "applications"} across six stages.`
+
+  // layout.tsx wraps children in <main className="min-h-full p-6"> (p-6 = 24px × 2 sides = 48px).
+  // min-h-full doesn't give <main> a definite height for h-full to resolve against,
+  // so we subtract the known padding directly from 100vh.
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="h-[calc(100vh-48px)] flex flex-col p-8 overflow-hidden">
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="shrink-0 flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-xl font-medium text-gray-900">Applications</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {loading ? "Loading..." : `${applications.length} total`}
-          </p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-[#111827] tracking-tight">Applications</h1>
+            {!loading && !error && applications.length > 0 && (
+              <span className="text-xs font-semibold text-[#6B7280] bg-[#F3F4F6] px-2 py-0.5 rounded-full">
+                {applications.length}
+              </span>
+            )}
+          </div>
+          {subtitle && (
+            <p className="text-sm text-[#6B7280] mt-1">{subtitle}</p>
+          )}
         </div>
-        <button
-          onClick={() => router.push("/applications/new")}
-          className="text-sm bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
-        >
-          + New Application
-        </button>
-      </div>
-
-      {/* States */}
-      {loading && (
-        <div className="text-sm text-gray-400">Loading your applications...</div>
-      )}
-
-      {error && (
-        <div className="text-sm text-red-500">{error}</div>
-      )}
-
-      {!loading && !error && applications.length === 0 && (
-        <div className="border border-gray-200 rounded-xl px-6 py-16 text-center">
-          <p className="text-sm font-medium text-gray-900 mb-1">No applications yet</p>
-          <p className="text-sm text-gray-400 mb-4">
-            Start tracking by adding your first application.
-          </p>
+        <div className="flex flex-col items-end gap-2">
+          {!loading && !error && applications.length > 0 && (
+            <p className="text-sm text-[#6B7280] text-right">
+              You have{" "}
+              <span className="font-semibold text-[#111827]">
+                {applications.length} {applications.length === 1 ? "application" : "applications"}
+              </span>{" "}
+              tracked &mdash;{" "}
+              {staleCount === 0 ? (
+                "all up to date."
+              ) : (
+                <>
+                  <span className="font-semibold text-[#111827]">
+                    {staleCount} {staleCount === 1 ? "has" : "have"}
+                  </span>{" "}
+                  had no update in 14+ days.
+                </>
+              )}
+            </p>
+          )}
           <button
             onClick={() => router.push("/applications/new")}
-            className="text-sm bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
+            className="bg-[#FC8019] text-white text-sm px-4 py-2 rounded-lg hover:opacity-90 transition-opacity"
           >
             + New Application
           </button>
         </div>
+      </div>
+
+      {/* Loading */}
+      {loading && (
+        <div className="text-sm text-[#9CA3AF]">Loading your applications...</div>
       )}
 
-      {/* Applications list */}
-      {!loading && !error && applications.length > 0 && (
-        <div className="border border-gray-200 rounded-xl overflow-hidden">
-          {applications.map((app, i) => (
-            <div
-              key={app.id}
-              onClick={() => router.push(`/applications/${app.id}`)}
-              className={`flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-gray-50 transition-colors ${
-                i < applications.length - 1 ? "border-b border-gray-200" : ""
-              }`}
-            >
-              {/* Left — company + role */}
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-sm font-medium text-gray-900 truncate">
-                  {app.companyName}
-                </span>
-                <span className="text-xs text-gray-500 truncate">{app.jobTitle}</span>
-              </div>
+      {/* Error */}
+      {!loading && error && (
+        <div className="text-sm text-red-600">{error}</div>
+      )}
 
-              {/* Right — status, source, date */}
-              <div className="flex items-center gap-4 shrink-0 ml-4">
-                <span className="text-xs text-gray-400">
-                  {SOURCE_LABELS[app.source]}
-                </span>
-                <span className="text-xs text-gray-400">
-                  {formatDate(app.dateApplied)}
+      {/* Empty state */}
+      {!loading && !error && applications.length === 0 && (
+        <div className="flex-1 min-h-0 flex items-center justify-center">
+          <div className="border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)] px-6 py-16 text-center">
+            <p className="text-sm font-medium text-[#111827] mb-1">No applications yet</p>
+            <p className="text-sm text-[#9CA3AF] mb-4">Start tracking by adding your first application.</p>
+            <button
+              onClick={() => router.push("/applications/new")}
+              className="bg-[#FC8019] text-white text-sm px-4 py-2 rounded-lg hover:opacity-90 transition-opacity"
+            >
+              + New Application
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Kanban board — grid fills remaining height, columns stretch to match */}
+      {!loading && !error && applications.length > 0 && (
+        <div className="flex-1 min-h-0 grid grid-cols-6 gap-4 pb-2">
+          {columns.map(({ status, items }) => (
+            <div
+              key={status}
+              className="min-w-0 h-full flex flex-col bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden"
+            >
+              {/* Accent strip */}
+              <div className="shrink-0 h-[3px] w-full" style={{ backgroundColor: STATUS_COLORS[status] }} />
+
+              {/* Column header */}
+              <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-[#F0F1F4]">
+                <span className="text-[12.5px] font-bold text-[#111827]">
+                  {STATUS_LABELS[status]}
                 </span>
                 <span
-                  className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_STYLES[app.status]}`}
+                  className="text-[10px] font-semibold text-white px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: STATUS_COLORS[status] }}
                 >
-                  {STATUS_LABELS[app.status]}
+                  {items.length}
                 </span>
+              </div>
+
+              {/* Column body */}
+              <div className="flex-1 min-h-0 flex flex-col gap-2.5 p-3 overflow-y-auto">
+                {items.length === 0 ? (
+                  <div className="text-xs text-[#9CA3AF] text-center py-6">No applications</div>
+                ) : (
+                  items.map((app) => (
+                    <div
+                      key={app.id}
+                      onClick={() => router.push(`/applications/${app.id}`)}
+                      className="bg-white border border-[#E5E7EB] rounded-[10px] px-3.5 py-3 flex flex-col gap-1.5 cursor-pointer hover:border-[#FC8019] hover:shadow-[0_1px_3px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)] transition-all"
+                    >
+                      <p className="text-[13px] font-semibold text-[#111827] truncate">
+                        {app.companyName}
+                      </p>
+                      <p className="text-[11px] text-[#6B7280] truncate">
+                        {app.jobTitle}
+                      </p>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <span className="text-[10px] text-[#9CA3AF]">
+                          {SOURCE_LABELS[app.source]}
+                        </span>
+                        <span className="text-[10px] text-[#9CA3AF]">
+                          {formatDate(app.dateApplied)}
+                        </span>
+                      </div>
+                      <span
+                        className="self-start mt-1 text-[10px] font-medium text-white px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: STATUS_COLORS[app.status] }}
+                      >
+                        {STATUS_LABELS[app.status]}
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           ))}
