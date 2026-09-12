@@ -29,10 +29,10 @@ export default function ProtectedLayout({
   }, [isLoaded, isSignedIn])
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
+    <div className="flex h-screen bg-[#F4F5F7] overflow-hidden">
       <Sidebar />
-      <div className="flex-1 pt-3 pr-3 pb-3">
-        <main className="min-h-full bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+      <div className="flex-1 overflow-y-auto">
+        <main className="min-h-full p-6">
           {children}
         </main>
       </div>
