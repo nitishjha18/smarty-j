@@ -1,5 +1,5 @@
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000"
 
 async function apiFetch(path: string, token: string, options: RequestInit = {}) {
   const res = await fetch(`${API_URL}${path}`, {
