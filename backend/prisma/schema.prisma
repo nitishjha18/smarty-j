@@ -12,13 +12,13 @@ datasource db {
 // User — stores user info, target role, resume URL
 // Application — the core table, one row per job applied to
 // StatusHistory — every time status changes, log it (this powers the timeline)
-// AIInterview — stores AI generated questions + user's saved answers
+// ResumeAnalysis — stores AI resume analysis result per application, wiped when resume is updated
 // Reminder — follow up reminder date per application
 
 
 model User {
   id              String   @id @default(cuid())
-  clerkId         String   @unique  // This is how you link Clerk user to your DB
+  clerkId         String   @unique
   name            String
   email           String   @unique
   profilePicture  String?
@@ -34,71 +34,62 @@ model User {
 }
 
 enum ApplicationStatus {
-APPLIED
-SCREENING
-INTERVIEW
-ASSIGNMENT
-OFFER
-REJECTED
+  APPLIED
+  SCREENING
+  INTERVIEW
+  ASSIGNMENT
+  OFFER
+  REJECTED
 }
 
 enum ApplicationSource {
-LINKED_IN
-NAUKARI
-REFERAL
-COLDEMAIL
-SOCIAL_MEDIA
-OTHER_JOB_APPS
+  LINKED_IN
+  NAUKARI
+  REFERAL
+  COLDEMAIL
+  SOCIAL_MEDIA
+  OTHER_JOB_APPS
 }
 
 model Application {
-id String  @id @default(cuid())
-companyName String
-jobTitle String
-jobDescription String
-status ApplicationStatus @default(APPLIED)
-source ApplicationSource 
-dateApplied DateTime @default(now())
-notes String?
-createdAt DateTime @default(now())
-updatedAt DateTime @updatedAt
-userId String
-user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-aiInterviews AiInterview[]
-reminders Reminder[]
-statusHistory StatusHistory[]
+  id             String            @id @default(cuid())
+  companyName    String
+  jobTitle       String
+  jobDescription String
+  status         ApplicationStatus @default(APPLIED)
+  source         ApplicationSource
+  dateApplied    DateTime          @default(now())
+  notes          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resumeAnalysis ResumeAnalysis?
+  reminders      Reminder[]
+  statusHistory  StatusHistory[]
 }
 
-model StatusHistory  {
-id String @id @default(cuid())
-applicationId String
-status ApplicationStatus @default(APPLIED)
-createdAt DateTime @default(now())
-application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+model StatusHistory {
+  id            String            @id @default(cuid())
+  applicationId String
+  status        ApplicationStatus @default(APPLIED)
+  createdAt     DateTime          @default(now())
+  application   Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 }
 
-model AiInterview {
-id String @id @default(cuid())
-applicationId String
-overallScore Int?
-overallFeedback String?
-createdAt DateTime @default(now())
-updatedAt DateTime @updatedAt
-application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-questions AiInterviewQuestion[]
+model ResumeAnalysis {
+  id              String      @id @default(cuid())
+  applicationId   String      @unique
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  matchScore      Int
+  missingKeywords String
+  strongestPoints String
+  redFlags        String
+  recruiterTake   String
+  suggestions     String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 }
-
-model AiInterviewQuestion {
-id String @id @default(cuid())
-question String
-userAnswer String?
-aiInterviewId String
-questionNumber Int
-createdAt DateTime @default(now())
-updatedAt DateTime @updatedAt
-aiInterview AiInterview @relation(fields: [aiInterviewId], references: [id], onDelete: Cascade)
-}
-
 
 model Reminder {
   id            String      @id @default(cuid())
