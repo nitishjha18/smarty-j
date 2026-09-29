@@ -9,27 +9,14 @@ import {
   updateApplication,
   deleteApplication,
   analyzeResume,
-  generateInterviewPrep,
-  getAnswers,
-  saveAnswers,
-  createReminder
+  createReminder,
+  getResumeAnalysis,
 } from "../../../lib/api"
 import type {
   Application,
   ApplicationStatus,
-  AiInterview,
-  AiInterviewQuestion,
+  ResumeAnalysis,
 } from "../../../types"
-
-
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface ResumeAnalysis {
-  matchScore: number
-  missingKeywords: string[]
-  suggestions: string[]
-}
 
 // ─── Label Maps ───────────────────────────────────────────────────────────────
 
@@ -225,39 +212,6 @@ function PipelineStepper({ application }: { application: Application }) {
   )
 }
 
-// ─── Score ring (Resume match) ─────────────────────────────────────────────────
-
-function ScoreRing({ score }: { score: number }) {
-  const radius = 36
-  const circumference = 2 * Math.PI * radius
-  const dash = (Math.min(100, Math.max(0, score)) / 100) * circumference
-
-  return (
-    <div className="flex flex-col items-center gap-1 mb-[18px]">
-      <div className="relative w-[88px] h-[88px]">
-        <svg width="88" height="88" viewBox="0 0 88 88" className="-rotate-90">
-          <circle cx="44" cy="44" r={radius} fill="none" stroke="#E5E7EB" strokeWidth="7" />
-          <circle
-            cx="44"
-            cy="44"
-            r={radius}
-            fill="none"
-            stroke="#FF6B35"
-            strokeWidth="7"
-            strokeDasharray={`${dash} ${circumference}`}
-            strokeLinecap="round"
-          />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-[22px] font-bold text-gray-900 tracking-tight">{score}</span>
-          <span className="text-[10px] text-gray-400 font-medium -mt-0.5">% match</span>
-        </div>
-      </div>
-      <span className="text-xs text-gray-500 font-medium">{scoreLabel(score)}</span>
-    </div>
-  )
-}
-
 // ─── Job description modal ──────────────────────────────────────────────────────
 
 function JobDescriptionModal({
@@ -304,7 +258,7 @@ export default function ApplicationDetailPage() {
   const { getToken } = useAuth()
 
   // ── Tab / UI-only state ──
-  const [activeTab, setActiveTab] = useState<"overview" | "aitools" | "reminder">("overview")
+  const [activeTab, setActiveTab] = useState<"overview" | "ai" | "reminder">("overview")
   const [overflowOpen, setOverflowOpen] = useState(false)
   const [jdModalOpen, setJdModalOpen] = useState(false)
   const overflowRef = useRef<HTMLDivElement>(null)
@@ -328,18 +282,13 @@ export default function ApplicationDetailPage() {
   const [deleting, setDeleting] = useState(false)
 
   // ── Resume analysis state ──
-  const [analysis, setAnalysis] = useState<ResumeAnalysis | null>(null)
-  const [analyzingResume, setAnalyzingResume] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
 
-  // ── Interview prep state ──
-  const [interviews, setInterviews] = useState<AiInterview[]>([])
-  const [generatingPrep, setGeneratingPrep] = useState(false)
-  const [prepError, setPrepError] = useState<string | null>(null)
-  const [answers, setAnswers] = useState<Record<string, string>>({})
-  const [savingAnswers, setSavingAnswers] = useState(false)
-  const [answersSaved, setAnswersSaved] = useState(false)
-  const [confirmRegenerate, setConfirmRegenerate] = useState(false)
+  // ─── AI Resume Fit state ──────────────────────────────────────────────────────
+  const [savedAnalysis, setSavedAnalysis] = useState<ResumeAnalysis | null>(null)
+  const [loadingAnalysis, setLoadingAnalysis] = useState(true)
+  const [copied, setCopied] = useState(false)
 
   // ── Reminder state ──
   const [reminderDate, setReminderDate] = useState("")
@@ -360,7 +309,7 @@ export default function ApplicationDetailPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  // ─── Mount: load application + existing interview answers ─────────────────
+  // ─── Mount: load application + saved resume analysis ─────────────────────
 
   useEffect(() => {
     if (!id) return
@@ -370,39 +319,27 @@ export default function ApplicationDetailPage() {
         const token = await getToken()
         if (!token) return
 
-        // Parallel fetch — application data and any existing interview answers
-        const [appData, answersData] = await Promise.all([
+        // Parallel fetch — application data and any saved resume analysis
+        const [appData, analysisRes] = await Promise.all([
           getApplication(token, id),
-          getAnswers(token, id).catch(() => ({ interviews: [] })),
-          // getAnswers can 404 if no interviews exist yet — treat that as empty
+          getResumeAnalysis(token, id).catch(() => ({ analysis: null })),
         ])
 
         const app: Application = appData.application
         setApplication(app)
         setNotes(app.notes ?? "")
-
-        // If interview questions already exist, populate them
-        if (answersData.interviews && answersData.interviews.length > 0) {
-          setInterviews(answersData.interviews)
-
-          // Pre-populate answers map from saved answers
-          const savedAnswers: Record<string, string> = {}
-          answersData.interviews.forEach((interview: AiInterview) => {
-            interview.questions.forEach((q: AiInterviewQuestion) => {
-              savedAnswers[q.id] = q.userAnswer ?? ""
-            })
-          })
-          setAnswers(savedAnswers)
-        }
+        setSavedAnalysis(analysisRes.analysis ?? null)
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Failed to load application")
       } finally {
         setLoading(false)
+        setLoadingAnalysis(false)
       }
     }
 
     load()
   }, [id, getToken])
+
 
   // ─── Status update ────────────────────────────────────────────────────────
 
@@ -463,7 +400,7 @@ export default function ApplicationDetailPage() {
 
   // ─── Resume Analysis ──────────────────────────────────────────────────────
 
-  const handleAnalyzeResume = async () => {
+  const handleAnalyze = async () => {
     if (!application) return
 
     // Client-side pre-check — no point calling the API without a JD
@@ -472,92 +409,43 @@ export default function ApplicationDetailPage() {
       return
     }
 
-    setAnalyzingResume(true)
-    setAnalysis(null)
+    setAnalyzing(true)
     setAnalysisError(null)
-
     try {
       const token = await getToken()
       if (!token) return
-      const data = await analyzeResume(token, id)
-      setAnalysis(data.analysis)
-    } catch (err: unknown) {
+      const res = await analyzeResume(token, application.id)
+      setSavedAnalysis(res.analysis)
+    } catch (err) {
       const message = err instanceof Error ? err.message : "Analysis failed"
-      // Surface the backend's specific error messages clearly
+      // Surface the backend's specific "no resume" error clearly
       if (message.toLowerCase().includes("resume")) {
         setAnalysisError("No resume uploaded. Upload one from your profile page.")
       } else {
         setAnalysisError(message)
       }
     } finally {
-      setAnalyzingResume(false)
+      setAnalyzing(false)
     }
   }
 
-  // ─── Interview Prep ───────────────────────────────────────────────────────
+  const handleCopyPrompt = () => {
+    if (!savedAnalysis || !application) return
+    const prompt = `I applied for a ${application.jobTitle} role at ${application.companyName}. My resume was analysed and here is what came back:
 
-  const handleGenerateInterviewPrep = async () => {
-    setGeneratingPrep(true)
-    setPrepError(null)
+Match Score: ${savedAnalysis.matchScore}/100
+Missing Keywords: ${savedAnalysis.missingKeywords.join(", ")}
+Red Flags: ${savedAnalysis.redFlags.join(", ")}
+Strongest Points: ${savedAnalysis.strongestPoints.join(", ")}
+Recruiter Take: ${savedAnalysis.recruiterTake}
 
-    try {
-      const token = await getToken()
-      if (!token) return
-      const data = await generateInterviewPrep(token, id)
+Please help me improve my resume to address these gaps.`
 
-      // Backend returns { interviewPrep: { interviewId, questions } }
-      // We need to shape this into AiInterview format for our state
-      const newInterview: AiInterview = {
-        id: data.interviewPrep.interviewId,
-        applicationId: id,
-        overallScore: null,
-        overallFeedback: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        questions: data.interviewPrep.questions,
-      }
-
-      setInterviews([newInterview])
-
-      // Initialize answers map for the new questions
-      const freshAnswers: Record<string, string> = {}
-      data.interviewPrep.questions.forEach((q: AiInterviewQuestion) => {
-        freshAnswers[q.id] = q.userAnswer ?? ""
-      })
-      setAnswers(freshAnswers)
-      setAnswersSaved(false)
-    } catch (err: unknown) {
-      setPrepError(err instanceof Error ? err.message : "Failed to generate questions")
-    } finally {
-      setGeneratingPrep(false)
-    }
+    navigator.clipboard.writeText(prompt)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
-  // ─── Save Answers ─────────────────────────────────────────────────────────
-
-  const handleSaveAnswers = async () => {
-    if (interviews.length === 0) return
-
-    setSavingAnswers(true)
-    setAnswersSaved(false)
-
-    try {
-      const token = await getToken()
-      if (!token) return
-
-      // Build the payload — one entry per question that has an answer
-      const answersPayload = Object.entries(answers)
-        .filter(([, answer]) => answer.trim() !== "")
-        .map(([questionId, answer]) => ({ questionId, answer }))
-
-      await saveAnswers(token, answersPayload)
-      setAnswersSaved(true)
-    } catch (err: unknown) {
-      setPrepError(err instanceof Error ? err.message : "Failed to save answers")
-    } finally {
-      setSavingAnswers(false)
-    }
-  }
 
   // ─── Create Reminder ──────────────────────────────────────────────────────
 
@@ -610,11 +498,6 @@ export default function ApplicationDetailPage() {
   }
 
   const notesChanged = notes !== (application.notes ?? "")
-  const currentQuestions = interviews.flatMap((i) => i.questions).sort(
-    (a, b) => a.questionNumber - b.questionNumber
-  )
-  const answeredCount = currentQuestions.filter((q) => (answers[q.id] ?? "").trim() !== "").length
-  const progressPct = currentQuestions.length > 0 ? (answeredCount / currentQuestions.length) * 100 : 0
   const sortedHistory = application.statusHistory
     ? [...application.statusHistory].sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -759,17 +642,14 @@ export default function ApplicationDetailPage() {
           Overview
         </button>
         <button
-          onClick={() => setActiveTab("aitools")}
-          className={`flex items-center gap-1.5 px-4 pt-2 pb-[11px] text-[13.5px] -mb-px border-b-2 transition-colors ${
-            activeTab === "aitools"
+          onClick={() => setActiveTab("ai")}
+          className={`px-4 pt-2 pb-[11px] text-[13.5px] -mb-px border-b-2 transition-colors ${
+            activeTab === "ai"
               ? "text-[#FF6B35] font-semibold border-[#FF6B35]"
               : "text-gray-500 font-medium border-transparent hover:text-gray-900"
           }`}
         >
-          AI Tools
-          <span className="text-[11px] font-semibold bg-[rgba(255,107,53,0.12)] text-[#FF6B35] px-1.5 py-px rounded-full">
-            2
-          </span>
+          AI Resume Fit
         </button>
         <button
           onClick={() => setActiveTab("reminder")}
@@ -1026,245 +906,175 @@ export default function ApplicationDetailPage() {
           </div>
         )}
 
-        {/* ════════════════ AI TOOLS TAB ════════════════ */}
-        {activeTab === "aitools" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+        {/* ════════════════ AI RESUME FIT TAB ════════════════ */}
+        {activeTab === "ai" && (
+          <div className="flex flex-col gap-4">
 
-            {/* Resume Analysis */}
-            <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07),0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[#F0F1F4] flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-[8px] bg-[#FFF4EF] text-[#FF6B35] flex items-center justify-center flex-shrink-0">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                      <line x1="16" y1="13" x2="8" y2="13" />
-                      <line x1="16" y1="17" x2="8" y2="17" />
-                      <polyline points="10 9 9 9 8 9" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-gray-900">Resume match</div>
-                    <div className="text-xs text-gray-500 mt-0.5">How well your resume fits this JD</div>
+            {/* Resume banner */}
+            <div className="text-[12.5px] text-gray-500">
+              Analysis is based on your currently uploaded resume.{" "}
+              <Link href="/profile" className="text-[#FF6B35] hover:underline">
+                Update resume in Profile
+              </Link>{" "}
+              to reanalyse with a newer version.
+            </div>
+
+            {/* Loading state */}
+            {loadingAnalysis && (
+              <div className="text-[13px] text-gray-500">Loading...</div>
+            )}
+
+            {/* No analysis yet */}
+            {!loadingAnalysis && !savedAnalysis && (
+              <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] p-6 flex flex-col items-center gap-4 text-center">
+                <div className="w-12 h-12 rounded-[12px] bg-[#FFF1EC] flex items-center justify-center">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FF6B35" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-[14px] font-semibold text-gray-900 mb-1">No analysis yet</div>
+                  <div className="text-[12.5px] text-gray-500">
+                    Compare your resume against this job description
                   </div>
                 </div>
+                {analysisError && (
+                  <div className="text-sm text-red-500">{analysisError}</div>
+                )}
                 <button
-                  onClick={handleAnalyzeResume}
-                  disabled={analyzingResume}
-                  className="text-[13px] font-semibold px-3.5 py-[7px] bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] whitespace-nowrap transition-colors"
+                  onClick={handleAnalyze}
+                  disabled={analyzing}
+                  className="text-[13px] font-semibold px-5 py-2 bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] transition-colors"
                 >
-                  {analyzingResume ? "Analysing..." : "Analyse"}
+                  {analyzing ? "Analysing..." : "Analyse resume"}
                 </button>
               </div>
+            )}
 
-              <div className="p-5">
+            {/* Analysis results */}
+            {!loadingAnalysis && savedAnalysis && (
+              <div className="flex flex-col gap-4">
+
+                {/* Reanalyse error (results are visible, so surface it here) */}
                 {analysisError && (
-                  <div className="mb-4 bg-[#FEF2F2] border border-[#FECACA] rounded-[6px] px-3.5 py-2.5 text-sm text-red-600">
-                    {analysisError}
-                  </div>
+                  <div className="text-sm text-red-500">{analysisError}</div>
                 )}
 
-                {!analysis && !analysisError && (
-                  <div className="flex flex-col items-center justify-center text-center gap-2.5 py-7 px-5">
-                    <div className="w-12 h-12 rounded-[12px] bg-[#FFF4EF] flex items-center justify-center mb-1">
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FF6B35" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M9 11l3 3L22 4" />
-                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                      </svg>
+                {/* Score card */}
+                <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-[13px] font-semibold text-gray-900">Match Score</div>
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={analyzing}
+                      className="text-[12px] text-gray-400 hover:text-[#FF6B35] transition-colors disabled:opacity-45"
+                    >
+                      {analyzing ? "Analysing..." : "Reanalyse"}
+                    </button>
+                  </div>
+                  <div className="flex items-end gap-3 mb-2">
+                    <div className="text-[42px] font-bold text-[#FF6B35] leading-none">
+                      {savedAnalysis.matchScore}
                     </div>
-                    <div className="text-[13.5px] font-semibold text-gray-900">No analysis yet</div>
-                    <div className="text-xs text-gray-500 max-w-[220px]">
-                      Click Analyse to compare your resume against this job description
-                    </div>
+                    <div className="text-[16px] text-gray-400 mb-1">/100</div>
                   </div>
-                )}
-
-                {analysis && (
-                  <div>
-                    <ScoreRing score={analysis.matchScore} />
-
-                    {analysis.missingKeywords.length > 0 && (
-                      <div className="mb-3.5">
-                        <div className="text-[11.5px] font-semibold text-gray-400 mb-2.5">Missing keywords</div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {analysis.missingKeywords.map((keyword) => (
-                            <span
-                              key={keyword}
-                              className="text-[11.5px] font-medium px-2.5 py-[3px] rounded-full bg-[#FEF2F2] text-[#DC2626] border border-[#FECACA]"
-                            >
-                              {keyword}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {analysis.suggestions.length > 0 && (
-                      <div>
-                        <div className="text-[11.5px] font-semibold text-gray-400 mb-2.5">Suggestions</div>
-                        <div className="flex flex-col gap-2">
-                          {analysis.suggestions.map((suggestion, i) => (
-                            <div key={i} className="flex gap-2 text-[12.5px] text-gray-700 leading-relaxed">
-                              <span className="w-[5px] h-[5px] rounded-full bg-[#FF6B35] flex-shrink-0 mt-[6px]" />
-                              <span>{suggestion}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                  <div className="text-[12.5px] text-gray-500 mb-3">
+                    {scoreLabel(savedAnalysis.matchScore)}
                   </div>
-                )}
-              </div>
-            </div>
-
-            {/* Interview Prep — spans full width once questions exist */}
-            <div
-              className={`bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07),0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden ${
-                currentQuestions.length > 0 ? "md:col-span-2" : ""
-              }`}
-            >
-              <div className="px-5 py-4 border-b border-[#F0F1F4] flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-[8px] bg-[#F5F3FF] text-[#6D28D9] flex items-center justify-center flex-shrink-0">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-gray-900">Interview prep</div>
-                    <div className="text-xs text-gray-500 mt-0.5">AI questions based on this job description</div>
+                  <div className="h-2 bg-[#F3F4F6] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#FF6B35] rounded-full transition-all"
+                      style={{ width: `${savedAnalysis.matchScore}%` }}
+                    />
                   </div>
                 </div>
 
-                {!confirmRegenerate ? (
-                  <button
-                    onClick={() => {
-                      if (currentQuestions.length > 0) {
-                        setConfirmRegenerate(true)
-                      } else {
-                        handleGenerateInterviewPrep()
-                      }
-                    }}
-                    disabled={generatingPrep}
-                    className="text-[13px] font-semibold px-3.5 py-[7px] bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] whitespace-nowrap transition-colors"
-                  >
-                    {generatingPrep
-                      ? "Generating..."
-                      : currentQuestions.length > 0
-                      ? "Regenerate"
-                      : "Generate"}
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-2 whitespace-nowrap">
-                    <span className="text-xs text-gray-500">Replace questions and answers?</span>
-                    <button
-                      onClick={() => {
-                        setConfirmRegenerate(false)
-                        handleGenerateInterviewPrep()
-                      }}
-                      className="text-[13px] font-semibold px-3 py-[7px] bg-red-600 text-white rounded-[6px] hover:bg-red-700"
-                    >
-                      Yes, regenerate
-                    </button>
-                    <button
-                      onClick={() => setConfirmRegenerate(false)}
-                      className="text-[13px] px-2 text-gray-500 hover:text-gray-800"
-                    >
-                      Cancel
-                    </button>
+                {/* Recruiter take */}
+                <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] px-5 py-4">
+                  <div className="text-[12px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                    Recruiter Take
                   </div>
-                )}
-              </div>
-
-              <div className="p-5">
-                {prepError && (
-                  <div className="mb-4 bg-[#FEF2F2] border border-[#FECACA] rounded-[6px] px-3.5 py-2.5 text-sm text-red-600">
-                    {prepError}
+                  <div className="text-[13.5px] text-gray-700 italic leading-relaxed">
+                    &ldquo;{savedAnalysis.recruiterTake}&rdquo;
                   </div>
-                )}
+                </div>
 
-                {currentQuestions.length === 0 && !prepError && (
-                  <div className="flex flex-col items-center justify-center text-center gap-2.5 py-7 px-5">
-                    <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-1">
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6D28D9" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                        <line x1="12" y1="17" x2="12.01" y2="17" />
-                      </svg>
-                    </div>
-                    <div className="text-[13.5px] font-semibold text-gray-900">No questions yet</div>
-                    <div className="text-xs text-gray-500 max-w-[220px]">
-                      Generate role-specific interview questions to practise with
-                    </div>
+                {/* Strongest points */}
+                <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] px-5 py-4">
+                  <div className="text-[12px] font-semibold text-gray-400 uppercase tracking-wide mb-3">
+                    Strongest Points
                   </div>
-                )}
-
-                {currentQuestions.length > 0 && (
-                  <div>
-                    {/* Progress indicator — visual only, Save Answers stays below per spec */}
-                    <div className="flex items-center gap-3 mb-4">
-                      <span className="text-xs font-medium text-gray-500 whitespace-nowrap">
-                        {answeredCount} of {currentQuestions.length} answered
-                      </span>
-                      <div className="h-1 bg-[#E5E7EB] rounded-full flex-1 overflow-hidden">
-                        <div
-                          className="h-full bg-[#FF6B35] rounded-full transition-all"
-                          style={{ width: `${progressPct}%` }}
-                        />
+                  <div className="flex flex-col gap-2">
+                    {savedAnalysis.strongestPoints.map((point, i) => (
+                      <div key={i} className="flex items-start gap-2 text-[13px] text-gray-700">
+                        <span className="text-[#15803D] mt-0.5 flex-shrink-0">
+                          <CheckIcon size={13} />
+                        </span>
+                        {point}
                       </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Missing keywords */}
+                {savedAnalysis.missingKeywords.length > 0 && (
+                  <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] px-5 py-4">
+                    <div className="text-[12px] font-semibold text-gray-400 uppercase tracking-wide mb-3">
+                      Missing Keywords
                     </div>
+                    <div className="flex flex-wrap gap-2">
+                      {savedAnalysis.missingKeywords.map((kw, i) => (
+                        <span
+                          key={i}
+                          className="px-2.5 py-1 bg-[#FFF1EC] text-[#C2410C] text-[12px] font-medium rounded-full border border-[rgba(194,65,12,0.15)]"
+                        >
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                    <div className="flex flex-col gap-4">
-                      {currentQuestions.map((q, index) => {
-                        const isAnswered = (answers[q.id] ?? "").trim() !== ""
-                        return (
-                          <div key={q.id} className="border border-[#E5E7EB] rounded-[6px] overflow-hidden">
-                            <div className="flex items-start gap-2.5 px-3.5 py-3 bg-[#F3F4F6] border-b border-[#E5E7EB]">
-                              <div className="w-5 h-5 rounded-full bg-[#FF6B35] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-px">
-                                {index + 1}
-                              </div>
-                              <div className="text-[13px] font-medium text-gray-900 leading-relaxed">
-                                {q.question}
-                              </div>
-                              {isAnswered && (
-                                <div className="ml-auto flex-shrink-0 text-[#15803D]">
-                                  <CheckIcon size={16} />
-                                </div>
-                              )}
-                            </div>
-                            <textarea
-                              value={answers[q.id] ?? ""}
-                              onChange={(e) =>
-                                setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
-                              }
-                              rows={2}
-                              placeholder="Write your answer here…"
-                              className="w-full min-h-[70px] px-3.5 py-[11px] text-[13px] text-gray-900 resize-y outline-none leading-relaxed"
-                            />
-                          </div>
-                        )
-                      })}
-
-                      {/* Save answers */}
-                      <div className="flex items-center justify-between pt-1">
-                        {answersSaved && (
-                          <span className="text-sm text-[#15803D] font-medium">Answers saved.</span>
-                        )}
-                        <div className="ml-auto">
-                          <button
-                            onClick={handleSaveAnswers}
-                            disabled={savingAnswers}
-                            className="text-[13px] font-semibold px-4 py-[7px] bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] transition-colors"
-                          >
-                            {savingAnswers ? "Saving..." : "Save answers"}
-                          </button>
+                {/* Red flags */}
+                {savedAnalysis.redFlags.length > 0 && (
+                  <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] px-5 py-4">
+                    <div className="text-[12px] font-semibold text-gray-400 uppercase tracking-wide mb-3">
+                      Red Flags
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {savedAnalysis.redFlags.map((flag, i) => (
+                        <div key={i} className="flex items-start gap-2 text-[13px] text-gray-700">
+                          <span className="text-red-500 mt-0.5 flex-shrink-0">
+                            <CrossIcon size={13} />
+                          </span>
+                          {flag}
                         </div>
-                      </div>
+                      ))}
                     </div>
                   </div>
                 )}
+
+                {/* Copy improvement prompt */}
+                <div className="flex justify-end pt-1">
+                  <button
+                    onClick={handleCopyPrompt}
+                    className="text-[12.5px] font-medium px-4 py-2 border border-[#E5E7EB] rounded-[6px] text-gray-600 hover:border-[#FF6B35] hover:text-[#FF6B35] transition-colors"
+                  >
+                    {copied ? "Copied!" : "Copy improvement prompt"}
+                  </button>
+                </div>
+
+                {/* Analysed date */}
+                <div className="text-[11.5px] text-gray-400 text-right">
+                  Analysed on {formatDate(savedAnalysis.createdAt)}
+                </div>
+
               </div>
-            </div>
+            )}
           </div>
         )}
 
