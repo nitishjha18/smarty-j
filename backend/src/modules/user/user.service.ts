@@ -31,10 +31,20 @@ export const getUserByClerkId = async (clerkId: string) => {
 };
 
 export const updateResumeUrl = async (
-  userId: string, 
+  userId: string,
   resumeUrl: string,
   resumeText: string,
 ) => {
+  // Delete all saved resume analyses for this user's applications
+  // so they get fresh analysis against the new resume
+  await prisma.resumeAnalysis.deleteMany({
+    where: {
+      application: {
+        userId
+      }
+    }
+  })
+
   return prisma.user.update({
     where: { id: userId },
     data: { resumeUrl, resumeText },
@@ -54,4 +64,3 @@ export const updateUserProfile = async (
     data
   })
 }
-
