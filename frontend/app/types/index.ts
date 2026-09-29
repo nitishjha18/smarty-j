@@ -51,24 +51,17 @@ export interface Application {
   statusHistory?: StatusHistory[]
 }
 
-export interface AiInterviewQuestion {
-  id: string
-  aiInterviewId: string
-  question: string
-  userAnswer: string | null
-  questionNumber: number
-  createdAt: string
-  updatedAt: string
-}
-
-export interface AiInterview {
+export interface ResumeAnalysis {
   id: string
   applicationId: string
-  overallScore: number | null
-  overallFeedback: string | null
+  matchScore: number
+  missingKeywords: string[]
+  strongestPoints: string[]
+  redFlags: string[]
+  recruiterTake: string
+  suggestions: string[]
   createdAt: string
   updatedAt: string
-  questions: AiInterviewQuestion[]
 }
 
 export interface Reminder {

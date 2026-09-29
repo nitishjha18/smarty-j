@@ -83,20 +83,9 @@ export const analyzeResume = (token: string, applicationId: string) =>
     body: JSON.stringify({ applicationId })
   })
 
-export const generateInterviewPrep = (token: string, applicationId: string) =>
-  apiFetch("/api/ai/interview-prep", token, {
-    method: "POST",
-    body: JSON.stringify({ applicationId })
-  })
+export const getResumeAnalysis = (token: string, appId: string) =>
+  apiFetch(`/api/ai/resume-analysis/${appId}`, token)
 
-export const saveAnswers = (token: string, answers: object[]) =>
-  apiFetch("/api/ai/save-answers", token, {
-    method: "POST",
-    body: JSON.stringify({ answers })
-  })
-
-export const getAnswers = (token: string, appId: string) =>
-  apiFetch(`/api/ai/answers/${appId}`, token)
 
 // ─── Reminders ───────────────────────────────────────────
 
