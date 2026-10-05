@@ -13,7 +13,7 @@ ApplynTrack is a full-stack web application that helps final-year students and f
 The system solves three specific engineering problems:
 
 1. **Structured tracking** — storing application state with a full status transition history, not just a current status field
-2. **AI-assisted preparation** — sending resume text and job descriptions to a language model to produce actionable feedback and interview questions
+2. **AI-assisted resume fit** — comparing resume text against job descriptions with local keyword extraction and Gemini-generated recruiter feedback
 3. **Automated follow-up** — a scheduled background job that sends email reminders without user action
 
 The backend is a REST API monolith. There are no microservices. The frontend is a Next.js application. They communicate over HTTP with Clerk-issued JWT tokens.
@@ -120,20 +120,15 @@ StatusHistory
   status          ApplicationStatus
   createdAt       DateTime          @default(now())
 
-AiInterview
+ResumeAnalysis
   id              String   @id @default(cuid())
-  applicationId   String
-  overallScore    Int?
-  overallFeedback String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-AiInterviewQuestion
-  id              String   @id @default(cuid())
-  aiInterviewId   String
-  question        String
-  userAnswer      String?
-  questionNumber  Int
+  applicationId   String   @unique
+  matchScore      Int
+  missingKeywords String
+  strongestPoints String
+  redFlags        String
+  recruiterTake   String
+  suggestions     String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -179,7 +174,7 @@ When a user uploads a PDF, pdf2json extracts the text and it is saved to `User.r
 
 The reason is performance: extracting text from a PDF is a blocking CPU operation. Doing it at upload time once means AI analysis requests are fast — they just read a string from the database rather than downloading and parsing a PDF on every request.
 
-The trade-off is that if the user uploads a new resume, the old text is overwritten. The URL also points to the new file. One resume per user, always the latest.
+The trade-off is that if the user uploads a new resume, the old text is overwritten. The URL also points to the new file. One resume per user, always the latest. When this happens, saved ResumeAnalysis rows for that user's applications are deleted so old AI results do not survive against a new resume.
 
 ---
 
@@ -265,19 +260,27 @@ The userId is derived exclusively from the Clerk JWT on the backend. The `requir
 
 ### Resume Analysis
 
-The service fetches two pieces of data from the database before calling Gemini:
+The AI module is centered on resume-to-job fit analysis. The old interview-prep flow was removed from the active source code and the database model was replaced with one saved ResumeAnalysis row per application.
+
+The service fetches two pieces of data from the database before producing an analysis:
 - `User.resumeText` — the full extracted text of the user's resume
 - `Application.jobDescription` — the job description for the specific application
 
-These are concatenated into a structured prompt:
+Missing keywords are computed locally before the Gemini call. The backend extracts normalized keywords from the job description, removes common stop words, compares them against the lowercased resume text, and caps the missing keyword list at 10 items. This keeps deterministic keyword detection out of the LLM call.
+
+Gemini is used only for the judgment-heavy parts of the analysis. The prompt asks for exactly this JSON structure:
 
 ```
-You are an expert technical recruiter and career coach.
-Compare the following resume against the job description and return a JSON response with exactly this structure:
+You are an expert technical recruiter.
+
+Analyse this resume against the job description for a [experienceLevel] applying for a [targetRole] role at [companyName].
+
+Return ONLY a JSON object with exactly this structure:
 {
   "matchScore": <number between 0 and 100>,
-  "missingKeywords": <array of strings>,
-  "suggestions": <array of strings>
+  "strongestPoints": <array of 2-4 strings>,
+  "redFlags": <array of 1-3 strings>,
+  "recruiterTake": <single sentence string>
 }
 Return ONLY the JSON object. No explanation, no markdown, no extra text.
 
@@ -288,26 +291,22 @@ JOB DESCRIPTION:
 [job description]
 ```
 
-The response is cleaned of markdown fences and parsed as JSON. The parsed result is returned directly to the frontend — it is not stored in the database.
+The response is cleaned of markdown fences and parsed as JSON. The parsed Gemini result is combined with the locally computed missing keywords, then saved through a Prisma upsert:
 
-### Interview Prep
+- `matchScore` is stored as an integer.
+- `missingKeywords`, `strongestPoints`, `redFlags`, and `suggestions` are stored as JSON strings because the Prisma model uses `String` columns for those fields.
+- API responses parse those JSON strings back into arrays for the frontend.
+- `suggestions` currently stores `[]` and is reserved for future expansion.
 
-The service sends the job description, the user's targetRole, and experienceLevel to Gemini with a prompt requesting a JSON array of 8 interview questions:
+### Why ResumeAnalysis Is Saved
 
-```
-You are an expert technical interviewer.
-Generate 8 interview questions for the following job description.
-The candidate is a [experienceLevel] applying for a [targetRole] role.
-Return ONLY a JSON array of strings.
-```
+The analysis result is saved because it is shown on the application detail page and should survive refreshes without another Gemini call. The `applicationId` field is unique, so each application has at most one saved analysis. Running analysis again overwrites the previous row with fresher output.
 
-The questions are saved to the database as AiInterviewQuestion records linked to a new AiInterview record. This is done before returning the response.
+This is a deliberate change from the earlier architecture where resume analysis was recomputed on demand and interview questions were saved. The current product no longer stores interview questions or answers. Instead, the saved artifact is the resume fit analysis itself.
 
-### Why Results Are Saved to the Database
+### Invalidating Analysis After Resume Upload
 
-Resume analysis results are NOT saved — they are recomputed on demand. This is acceptable because the input (resume + JD) is already stored and Gemini is fast enough.
-
-Interview questions ARE saved because the user writes answers to them over time and needs to retrieve them across sessions. Recomputing questions on every visit would produce different questions, invalidating the user's saved answers.
+ResumeAnalysis depends on `User.resumeText`. When a user uploads a new resume, the backend deletes all ResumeAnalysis rows for that user's applications before updating the resume URL and text. This keeps the frontend from showing analysis generated against an older resume.
 
 ---
 
@@ -422,17 +421,14 @@ The frontend is functional end-to-end. The current phase applies a consistent de
 
 ## 11. Known Technical Debt
 
-**Deprecated Clerk middleware** [Highest priority debt before production deployment]
-`requireAuth()` from `@clerk/express` is used in `middleware/auth.ts`. Clerk's SDK has deprecated this in favor of `clerkMiddleware()` with `getAuth()`. The deprecation warning prints on every server start. The application continues to work but will break when the next major Clerk version removes `requireAuth`.
-
 **No global error handler**
 Unhandled promise rejections and thrown errors outside try/catch blocks will crash the server. This is a reliability risk in production.
 
 **No input validation**
 All endpoints accept arbitrary JSON bodies. Prisma rejects type mismatches but does not enforce required fields or valid enum values at the application layer.
 
-**Hardcoded API URL in frontend**
-`frontend/app/dashboard/page.tsx` calls `http://localhost:5000/api/user/sync` directly. This will fail in any environment other than local development. The API client abstraction in `frontend/lib/api.ts` must replace all direct fetch calls before deployment.
+**Local API URL fallback**
+`frontend/app/lib/api.ts` falls back to `http://localhost:5000` when `NEXT_PUBLIC_API_URL` is missing, and `frontend/next.config.ts` contains a localhost API rewrite. Production deployment should provide the environment variable and review the rewrite so frontend API traffic points at the deployed backend.
 
 **resumeText stored as raw extracted text**
 The text extracted from PDFs includes spacing artifacts and layout noise from the PDF engine. This is sent directly to Gemini without cleaning. It works in practice but cleaner text would produce better AI results.

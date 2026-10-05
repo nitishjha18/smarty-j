@@ -1,20 +1,20 @@
-# ApplynTrack — Backend API Contract
+# ApplynTrack - Backend API Contract
 
 This document is the complete reference for the ApplynTrack backend API.
 It is written for frontend developers and AI assistants building the frontend.
-Do not modify the backend based on this document — the backend is complete and tested.
+Do not modify the backend based on this document. The backend implementation is the source of truth.
 
 ---
 
 ## Base URL
 
-```
+```txt
 http://localhost:5000
 ```
 
 In production this will be the Railway deployment URL. Use an environment variable:
 
-```
+```txt
 NEXT_PUBLIC_API_URL=http://localhost:5000
 ```
 
@@ -31,7 +31,7 @@ const { getToken } = useAuth()
 const token = await getToken()
 ```
 
-Send it as an Authorization header on every request:
+Send it as an Authorization header on every protected request:
 
 ```ts
 headers: {
@@ -40,28 +40,33 @@ headers: {
 }
 ```
 
-The token expires every 60 seconds. Always call `getToken()` fresh before each request — Clerk caches it internally so this is not expensive.
+The token expires frequently. Always call `getToken()` fresh before each request; Clerk caches it internally.
 
 If the token is missing or invalid the backend returns:
+
 ```json
 { "error": "Unauthorized" }
 ```
+
 with status 401.
 
-If the user exists in Clerk but not in the local database, the backend returns:
+For all protected routes except `/api/user/sync`, the backend also requires a matching local database user. If the Clerk user exists but has not been synced locally, the backend returns:
+
 ```json
 { "error": "User not found. Please sync first." }
 ```
+
 with status 401.
 
 ---
 
 ## Enum Values
 
-Use these exact strings when sending source or status values. Any other value will fail.
+Use these exact strings when sending `source` or `status` values. Any other value will fail at the Prisma/database layer.
 
 ### ApplicationStatus
-```
+
+```txt
 APPLIED
 SCREENING
 INTERVIEW
@@ -71,7 +76,8 @@ REJECTED
 ```
 
 ### ApplicationSource
-```
+
+```txt
 LINKED_IN
 NAUKARI
 REFERAL
@@ -80,16 +86,17 @@ SOCIAL_MEDIA
 OTHER_JOB_APPS
 ```
 
-Note: NAUKARI, REFERAL are intentional legacy spellings in the schema. Do not correct them.
+Note: `NAUKARI` and `REFERAL` are intentional legacy spellings in the schema. Do not correct them in frontend payloads.
 
 ---
 
 ## Schema Field Names
 
-Critical — these are the exact field names the backend uses. Do not assume alternatives.
+Critical: these are the exact field names the backend uses. Do not assume alternatives.
 
 ### User
-```
+
+```txt
 id
 clerkId
 name
@@ -104,56 +111,60 @@ updatedAt
 ```
 
 ### Application
-```
+
+```txt
 id
 userId
 companyName
-jobTitle          ← NOT "role" or "title"
+jobTitle          <- NOT "role" or "title"
 jobDescription
 status
 source
-dateApplied       ← NOT "appliedAt" or "date"
+dateApplied       <- NOT "appliedAt" or "date"
 notes
 createdAt
 updatedAt
 ```
 
 ### StatusHistory
-```
+
+```txt
 id
 applicationId
 status
 createdAt
 ```
 
-### AiInterview
-```
+### ResumeAnalysis
+
+```txt
 id
 applicationId
-overallScore
-overallFeedback
+matchScore
+missingKeywords
+strongestPoints
+redFlags
+recruiterTake
+suggestions
 createdAt
 updatedAt
 ```
 
-### AiInterviewQuestion
-```
-id
-aiInterviewId
-question
-userAnswer
-questionNumber
-createdAt
-updatedAt
-```
+Notes:
+
+- The database stores `missingKeywords`, `strongestPoints`, `redFlags`, and `suggestions` as JSON strings.
+- API responses parse those fields into arrays.
+- `suggestions` currently returns an empty array and is reserved for future use.
+- There is at most one `ResumeAnalysis` per application. Re-running analysis overwrites the previous saved result.
 
 ### Reminder
-```
+
+```txt
 id
 userId
 applicationId
 reminderDate
-isSent            ← NOT "sent"
+isSent            <- NOT "sent"
 notes
 createdAt
 updatedAt
@@ -167,34 +178,114 @@ updatedAt
 
 ### Health Check
 
-```
+```http
 GET /health
 ```
 
 No auth required.
 
 Response 200:
+
 ```json
 { "message": "Job tracker's server is live" }
 ```
 
 ---
 
-### User Module
+## User Module
 
 ---
 
-#### Sync User
+### Sync User
 
-```
+```http
 POST /api/user/sync
 ```
 
-Call this on every app load after sign in. Creates the local user if they don't exist. Safe to call multiple times — idempotent.
+Call this on every app load after sign in. It creates the local user if they do not exist. It is safe to call multiple times.
 
-No request body needed.
+No request body is needed.
 
 Response 200:
+
+```json
+{
+  "user": {
+    "id": "cmp07oqw40000r9w593fvr195",
+    "clerkId": "user_3DXzII2iaUCBA70MGr62tfNIGzG",
+    "name": "Nitish Jha",
+    "email": "nitish11jha@gmail.com",
+    "profilePicture": "https://img.clerk.com/...",
+    "targetRole": "Backend Developer",
+    "experienceLevel": "Fresher",
+    "resumeUrl": "https://...supabase.co/storage/v1/object/public/resumes/.../resume.pdf",
+    "resumeText": "Full extracted text of the resume...",
+    "createdAt": "2026-05-10T20:14:40.420Z",
+    "updatedAt": "2026-08-18T11:39:26.856Z"
+  }
+}
+```
+
+Response 401:
+
+```json
+{ "error": "Unauthorized" }
+```
+
+---
+
+### Get User Profile
+
+```http
+GET /api/user/profile
+```
+
+Response 200:
+
+```json
+{
+  "user": {
+    "id": "cmp07oqw40000r9w593fvr195",
+    "clerkId": "user_3DXzII2iaUCBA70MGr62tfNIGzG",
+    "name": "Nitish Jha",
+    "email": "nitish11jha@gmail.com",
+    "profilePicture": "https://img.clerk.com/...",
+    "targetRole": "Backend Developer",
+    "experienceLevel": "Fresher",
+    "resumeUrl": "https://...supabase.co/storage/v1/object/public/resumes/.../resume.pdf",
+    "resumeText": "Full extracted text of the resume...",
+    "createdAt": "2026-05-10T20:14:40.420Z",
+    "updatedAt": "2026-08-18T11:39:26.856Z"
+  }
+}
+```
+
+Response 404:
+
+```json
+{ "error": "User not found" }
+```
+
+---
+
+### Update User Profile
+
+```http
+PUT /api/user/profile
+```
+
+Request body, all fields optional:
+
+```json
+{
+  "name": "Nitish Jha",
+  "targetRole": "Backend Developer",
+  "experienceLevel": "Fresher"
+}
+```
+
+Response 200:
+
 ```json
 {
   "user": {
@@ -215,54 +306,20 @@ Response 200:
 
 ---
 
-#### Get User Profile
+### Upload Resume
 
-```
-GET /api/user/profile
-```
-
-Response 200: same shape as sync response above.
-
-Response 404:
-```json
-{ "error": "User not found" }
-```
-
----
-
-#### Update User Profile
-
-```
-PUT /api/user/profile
-```
-
-Request body (all fields optional):
-```json
-{
-  "name": "Nitish Jha",
-  "targetRole": "Backend Developer",
-  "experienceLevel": "Fresher"
-}
-```
-
-Response 200: full updated user object.
-
----
-
-#### Upload Resume
-
-```
+```http
 POST /api/user/resume
 ```
 
-Send as multipart/form-data. Field name must be `resume`. Only PDF files accepted.
+Send as `multipart/form-data`. Field name must be `resume`. Only PDF files are accepted.
 
-```
+```txt
 Content-Type: multipart/form-data
 Body: form-data key="resume" value=<PDF file>
 ```
 
-Do NOT send as JSON. Use FormData in the frontend:
+Do not send this endpoint as JSON. Use `FormData` in the frontend:
 
 ```ts
 const formData = new FormData()
@@ -272,11 +329,19 @@ fetch(`${API_URL}/api/user/resume`, {
   method: "POST",
   headers: { "Authorization": `Bearer ${token}` },
   body: formData
-  // Do NOT set Content-Type header — browser sets it automatically with boundary
+  // Do not set Content-Type. The browser sets the multipart boundary.
 })
 ```
 
+Behavior:
+
+- The PDF is uploaded to the Supabase `resumes` bucket at `<userId>/resume.pdf`.
+- The file path uses `upsert: true`, so a new upload replaces the previous resume file.
+- Text is extracted from the PDF and stored in `user.resumeText`.
+- All saved `ResumeAnalysis` rows for the user's applications are deleted so future analysis is based on the new resume.
+
 Response 200:
+
 ```json
 {
   "message": "Resume uploaded successfully",
@@ -286,24 +351,35 @@ Response 200:
 ```
 
 Response 400:
+
 ```json
 { "error": "No file uploaded" }
+```
+
+```json
 { "error": "Only PDF files are allowed" }
 ```
 
----
+Response 500:
 
-### Applications Module
-
----
-
-#### Create Application
-
+```json
+{ "error": "Failed to upload to storage" }
 ```
+
+---
+
+## Applications Module
+
+---
+
+### Create Application
+
+```http
 POST /api/applications
 ```
 
 Request body:
+
 ```json
 {
   "companyName": "Google",
@@ -316,9 +392,13 @@ Request body:
 ```
 
 Required: `companyName`, `jobTitle`, `source`
-Optional: `jobDescription`, `notes`, `dateApplied` (defaults to now)
+
+Optional: `jobDescription`, `notes`, `dateApplied`
+
+If `jobDescription` is omitted, the backend stores an empty string. If `dateApplied` is omitted, it defaults to the current server time.
 
 Response 201:
+
 ```json
 {
   "application": {
@@ -337,39 +417,47 @@ Response 201:
 }
 ```
 
-StatusHistory record is automatically created with status APPLIED.
+Response 400:
+
+```json
+{ "error": "companyName, jobTitle, and source are required" }
+```
+
+A `StatusHistory` record is automatically created with status `APPLIED`.
 
 ---
 
-#### List All Applications
+### List All Applications
 
-```
+```http
 GET /api/applications
 ```
 
 No request body.
 
 Response 200:
+
 ```json
 {
   "applications": [
     {
-      "id": "...",
+      "id": "cmsyideb30007ncphs5gpgeph",
+      "userId": "cmp07oqw40000r9w593fvr195",
       "companyName": "Google",
       "jobTitle": "Backend Engineer",
+      "jobDescription": "Design and build scalable backend systems...",
       "status": "APPLIED",
       "source": "LINKED_IN",
       "dateApplied": "2026-08-20T00:00:00.000Z",
-      "notes": "...",
-      "createdAt": "...",
-      "updatedAt": "...",
-      "userId": "...",
+      "notes": "Referral from college senior",
+      "createdAt": "2026-08-20T10:17:03.663Z",
+      "updatedAt": "2026-08-20T10:17:03.663Z",
       "statusHistory": [
         {
-          "id": "...",
-          "applicationId": "...",
+          "id": "cmt0history0001",
+          "applicationId": "cmsyideb30007ncphs5gpgeph",
           "status": "APPLIED",
-          "createdAt": "..."
+          "createdAt": "2026-08-20T10:17:03.663Z"
         }
       ]
     }
@@ -377,58 +465,71 @@ Response 200:
 }
 ```
 
-Ordered by dateApplied descending. Includes statusHistory for each application.
+Applications are ordered by `dateApplied` descending. Each application includes `statusHistory`, ordered by `createdAt` descending.
 
 ---
 
-#### Get Single Application
+### Get Single Application
 
-```
+```http
 GET /api/applications/:id
 ```
 
 Response 200:
+
 ```json
 {
   "application": {
-    "id": "...",
+    "id": "cmsyideb30007ncphs5gpgeph",
+    "userId": "cmp07oqw40000r9w593fvr195",
     "companyName": "Google",
     "jobTitle": "Backend Engineer",
-    "jobDescription": "...",
+    "jobDescription": "Design and build scalable backend systems...",
     "status": "SCREENING",
     "source": "LINKED_IN",
-    "dateApplied": "...",
-    "notes": "...",
-    "createdAt": "...",
-    "updatedAt": "...",
-    "userId": "...",
+    "dateApplied": "2026-08-20T00:00:00.000Z",
+    "notes": "Referral from college senior",
+    "createdAt": "2026-08-20T10:17:03.663Z",
+    "updatedAt": "2026-08-21T09:00:00.000Z",
     "statusHistory": [
-      { "id": "...", "status": "SCREENING", "createdAt": "..." },
-      { "id": "...", "status": "APPLIED", "createdAt": "..." }
+      {
+        "id": "cmt0history0002",
+        "applicationId": "cmsyideb30007ncphs5gpgeph",
+        "status": "SCREENING",
+        "createdAt": "2026-08-21T09:00:00.000Z"
+      },
+      {
+        "id": "cmt0history0001",
+        "applicationId": "cmsyideb30007ncphs5gpgeph",
+        "status": "APPLIED",
+        "createdAt": "2026-08-20T10:17:03.663Z"
+      }
     ]
   }
 }
 ```
 
 Response 404:
+
 ```json
 { "error": "Application not found" }
 ```
 
 ---
 
-#### Update Application
+### Update Application
 
-```
+```http
 PUT /api/applications/:id
 ```
 
-Request body (all fields optional — send only what you want to change):
+Request body, all fields optional:
+
 ```json
 {
   "companyName": "Google",
   "jobTitle": "Senior Backend Engineer",
-  "jobDescription": "...",
+  "jobDescription": "Updated job description...",
   "source": "LINKED_IN",
   "status": "SCREENING",
   "notes": "Updated notes",
@@ -436,194 +537,207 @@ Request body (all fields optional — send only what you want to change):
 }
 ```
 
-When status changes, a new StatusHistory record is automatically created.
-
-Response 200: full updated application with statusHistory.
-
-Response 404:
-```json
-{ "error": "Application not found" }
-```
-
----
-
-#### Delete Application
-
-```
-DELETE /api/applications/:id
-```
+When `status` changes, a new `StatusHistory` record is automatically created.
 
 Response 200:
-```json
-{ "message": "Application deleted successfully" }
-```
 
-Response 404:
-```json
-{ "error": "Application not found" }
-```
-
----
-
-### AI Module
-
----
-
-#### Analyze Resume
-
-```
-POST /api/ai/analyze-resume
-```
-
-Compares the user's stored resume text against the application's job description using Gemini.
-The user must have uploaded a resume first. The application must have a jobDescription.
-
-Request body:
 ```json
 {
-  "applicationId": "cmsyideb30007ncphs5gpgeph"
-}
-```
-
-Response 200:
-```json
-{
-  "analysis": {
-    "matchScore": 72,
-    "missingKeywords": ["Docker", "Kubernetes", "Redis"],
-    "suggestions": [
-      "Highlight your Node.js experience in the summary",
-      "Add a projects section showing distributed systems work"
-    ]
-  }
-}
-```
-
-Response 400:
-```json
-{ "error": "Resume not found. Please upload your resume first." }
-{ "error": "Application not found." }
-{ "error": "No job description found for this application." }
-```
-
----
-
-#### Generate Interview Prep
-
-```
-POST /api/ai/interview-prep
-```
-
-Generates interview questions based on the application's job description using Gemini.
-Questions are saved to the database and returned.
-
-Request body:
-```json
-{
-  "applicationId": "cmsyideb30007ncphs5gpgeph"
-}
-```
-
-Response 201:
-```json
-{
-  "interviewPrep": {
-    "interviewId": "cmsz36kto0001t0mfds7zwkpf",
-    "questions": [
+  "application": {
+    "id": "cmsyideb30007ncphs5gpgeph",
+    "userId": "cmp07oqw40000r9w593fvr195",
+    "companyName": "Google",
+    "jobTitle": "Senior Backend Engineer",
+    "jobDescription": "Updated job description...",
+    "status": "SCREENING",
+    "source": "LINKED_IN",
+    "dateApplied": "2026-08-20T00:00:00.000Z",
+    "notes": "Updated notes",
+    "createdAt": "2026-08-20T10:17:03.663Z",
+    "updatedAt": "2026-08-21T09:00:00.000Z",
+    "statusHistory": [
       {
-        "id": "cmsz36lxc0003t0mfsftdvet6",
-        "question": "What is the difference between horizontal and vertical scaling?",
-        "userAnswer": null,
-        "aiInterviewId": "cmsz36kto0001t0mfds7zwkpf",
-        "questionNumber": 1,
-        "createdAt": "...",
-        "updatedAt": "..."
+        "id": "cmt0history0002",
+        "applicationId": "cmsyideb30007ncphs5gpgeph",
+        "status": "SCREENING",
+        "createdAt": "2026-08-21T09:00:00.000Z"
       }
     ]
   }
 }
 ```
 
+Response 404:
+
+```json
+{ "error": "Application not found" }
+```
+
 ---
 
-#### Save Answers
+### Delete Application
 
-```
-POST /api/ai/save-answers
+```http
+DELETE /api/applications/:id
 ```
 
-Saves user answers to interview questions. Send all answers in one call.
+Response 200:
+
+```json
+{ "message": "Application deleted successfully" }
+```
+
+Response 404:
+
+```json
+{ "error": "Application not found" }
+```
+
+Deleting an application also cascades related `ResumeAnalysis` and `Reminder` rows through database relations. The service explicitly deletes related `StatusHistory` rows.
+
+---
+
+## AI Module
+
+The AI module now supports resume-to-job analysis. The previous interview-prep, save-answers, and get-answers endpoints were removed when `AiInterview` and `AiInterviewQuestion` were replaced by `ResumeAnalysis`.
+
+---
+
+### Analyze Resume
+
+```http
+POST /api/ai/analyze-resume
+```
+
+Compares the user's stored resume text against the application's job description.
+
+The backend:
+
+- Requires that the user has uploaded a resume first.
+- Requires that the application belongs to the current user.
+- Requires that the application has a non-empty `jobDescription`.
+- Extracts up to 10 missing keywords locally from the job description.
+- Calls Gemini for `matchScore`, `strongestPoints`, `redFlags`, and `recruiterTake`.
+- Upserts one `ResumeAnalysis` row for the application, replacing any previous analysis for that application.
 
 Request body:
+
 ```json
 {
-  "answers": [
-    {
-      "questionId": "cmsz36lxc0003t0mfsftdvet6",
-      "answer": "Horizontal scaling adds more machines..."
-    },
-    {
-      "questionId": "cmsz36nih000ft0mfdcn94jc0",
-      "answer": "Database indexing creates a data structure..."
-    }
-  ]
+  "applicationId": "cmsyideb30007ncphs5gpgeph"
 }
 ```
 
 Response 200:
-```json
-{ "saved": 2 }
-```
 
----
-
-#### Get Answers
-
-```
-GET /api/ai/answers/:appId
-```
-
-Fetches all interview sessions and answers for an application.
-
-Response 200:
 ```json
 {
-  "interviews": [
-    {
-      "id": "cmsz36kto0001t0mfds7zwkpf",
-      "applicationId": "cmsyideb30007ncphs5gpgeph",
-      "overallScore": null,
-      "overallFeedback": null,
-      "createdAt": "...",
-      "updatedAt": "...",
-      "questions": [
-        {
-          "id": "cmsz36lxc0003t0mfsftdvet6",
-          "question": "What is the difference between horizontal and vertical scaling?",
-          "userAnswer": "Horizontal scaling adds more machines...",
-          "questionNumber": 1,
-          "createdAt": "...",
-          "updatedAt": "..."
-        }
-      ]
-    }
-  ]
+  "analysis": {
+    "id": "cmt0analysis0001",
+    "applicationId": "cmsyideb30007ncphs5gpgeph",
+    "matchScore": 72,
+    "missingKeywords": ["docker", "kubernetes", "redis"],
+    "strongestPoints": [
+      "Backend API experience aligns well with the role.",
+      "Database work is relevant to the job description."
+    ],
+    "redFlags": [
+      "The resume does not clearly show production cloud deployment experience."
+    ],
+    "recruiterTake": "A promising backend candidate, but the resume should show stronger evidence of cloud and scaling experience.",
+    "suggestions": [],
+    "createdAt": "2026-09-20T01:22:57.000Z",
+    "updatedAt": "2026-09-20T01:22:57.000Z"
+  }
 }
 ```
 
----
+Response 400:
 
-### Reminders Module
-
----
-
-#### Create Reminder
-
+```json
+{ "error": "applicationId is required" }
 ```
+
+```json
+{ "error": "Resume not found. Please upload your resume first." }
+```
+
+```json
+{ "error": "Application not found." }
+```
+
+```json
+{ "error": "No job description found for this application." }
+```
+
+---
+
+### Get Saved Resume Analysis
+
+```http
+GET /api/ai/resume-analysis/:appId
+```
+
+Fetches the saved resume analysis for an application owned by the current user.
+
+Response 200 when analysis exists:
+
+```json
+{
+  "analysis": {
+    "id": "cmt0analysis0001",
+    "applicationId": "cmsyideb30007ncphs5gpgeph",
+    "matchScore": 72,
+    "missingKeywords": ["docker", "kubernetes", "redis"],
+    "strongestPoints": [
+      "Backend API experience aligns well with the role.",
+      "Database work is relevant to the job description."
+    ],
+    "redFlags": [
+      "The resume does not clearly show production cloud deployment experience."
+    ],
+    "recruiterTake": "A promising backend candidate, but the resume should show stronger evidence of cloud and scaling experience.",
+    "suggestions": [],
+    "createdAt": "2026-09-20T01:22:57.000Z",
+    "updatedAt": "2026-09-20T01:22:57.000Z"
+  }
+}
+```
+
+Response 200 when no saved analysis exists:
+
+```json
+{ "analysis": null }
+```
+
+Response 400:
+
+```json
+{ "error": "Application not found." }
+```
+
+Important frontend behavior:
+
+- Call `POST /api/ai/analyze-resume` to generate or refresh analysis.
+- Call `GET /api/ai/resume-analysis/:appId` to load an existing saved result.
+- After `POST /api/user/resume`, previous saved analyses are deleted and this endpoint will return `null` until analysis is run again.
+
+---
+
+## Reminders Module
+
+There is no list reminders endpoint currently. Reminders can be created, updated, and deleted.
+
+---
+
+### Create Reminder
+
+```http
 POST /api/reminders
 ```
 
 Request body:
+
 ```json
 {
   "applicationId": "cmsyideb30007ncphs5gpgeph",
@@ -633,9 +747,11 @@ Request body:
 ```
 
 Required: `applicationId`, `reminderDate`
+
 Optional: `notes`
 
 Response 201:
+
 ```json
 {
   "reminder": {
@@ -645,21 +761,32 @@ Response 201:
     "reminderDate": "2026-08-25T00:00:00.000Z",
     "isSent": false,
     "notes": "Follow up on application status",
-    "createdAt": "...",
-    "updatedAt": "..."
+    "createdAt": "2026-08-20T10:17:03.663Z",
+    "updatedAt": "2026-08-20T10:17:03.663Z"
   }
 }
 ```
 
+Response 400:
+
+```json
+{ "error": "applicationId and reminderDate are required" }
+```
+
+```json
+{ "error": "Application not found." }
+```
+
 ---
 
-#### Update Reminder
+### Update Reminder
 
-```
+```http
 PUT /api/reminders/:id
 ```
 
 Request body:
+
 ```json
 {
   "reminderDate": "2026-09-01",
@@ -669,39 +796,69 @@ Request body:
 
 Required: `reminderDate`
 
-Response 200: full updated reminder object.
+Optional: `notes`
 
-Response 404:
+Response 200:
+
+```json
+{
+  "reminder": {
+    "id": "cmt0iijwk000110ec5zyy1zqi",
+    "applicationId": "cmsyideb30007ncphs5gpgeph",
+    "userId": "cmp07oqw40000r9w593fvr195",
+    "reminderDate": "2026-09-01T00:00:00.000Z",
+    "isSent": false,
+    "notes": "Interview scheduled for 3pm",
+    "createdAt": "2026-08-20T10:17:03.663Z",
+    "updatedAt": "2026-08-21T09:00:00.000Z"
+  }
+}
+```
+
+Response 400:
+
+```json
+{ "error": "reminderDate is required" }
+```
+
 ```json
 { "error": "Reminder not found." }
 ```
 
 ---
 
-#### Delete Reminder
+### Delete Reminder
 
-```
+```http
 DELETE /api/reminders/:id
 ```
 
 Response 200:
+
 ```json
 { "message": "Reminder deleted successfully" }
 ```
 
----
+Response 400:
 
-### Dashboard Module
-
----
-
-#### Get Stats
-
+```json
+{ "error": "Reminder not found." }
 ```
+
+---
+
+## Dashboard Module
+
+---
+
+### Get Stats
+
+```http
 GET /api/dashboard/stats
 ```
 
 Response 200:
+
 ```json
 {
   "stats": {
@@ -714,34 +871,53 @@ Response 200:
 }
 ```
 
-- `responseRate` — percentage of applications that moved past APPLIED status
-- `rejectionRate` — percentage of applications with REJECTED status
-- `bestSource` — the ApplicationSource enum value that gave the most responses
-- `staleApplications` — applications still in APPLIED status after 14+ days
-- All rates are integers 0-100
+When there are no applications:
+
+```json
+{
+  "stats": {
+    "totalApplications": 0,
+    "responseRate": 0,
+    "rejectionRate": 0,
+    "bestSource": null,
+    "staleApplications": 0
+  }
+}
+```
+
+Field notes:
+
+- `responseRate` is the percentage of applications that moved past `APPLIED`.
+- `rejectionRate` is the percentage of applications with `REJECTED` status.
+- `bestSource` is the `ApplicationSource` enum value with the most non-`APPLIED` applications, or `null` if there are no responses.
+- `staleApplications` counts applications still in `APPLIED` status after more than 14 days.
+- Rates are rounded integers from 0 to 100.
 
 ---
 
 ## Remaining Backend Work
 
-The following items are intentionally deferred until after the functional frontend is complete. Do not implement these during frontend development.
+The following items are intentionally deferred until after the functional frontend is complete. Do not implement these during frontend development unless the backend task explicitly asks for them.
 
-- Global error handler middleware — currently each controller has its own try/catch
-- Input validation with Zod — no request body validation exists yet
-- Deprecated `requireAuth` from Clerk SDK — should be replaced with `clerkMiddleware` and `getAuth`
-- `.gitignore` cleanup — dist, generated, env files may not be fully ignored
-- Automated tests — no tests exist yet
-- UI polish pass — comes after functional frontend is working
+- Global error handler middleware. Most controllers still handle errors with local try/catch blocks.
+- Input validation with Zod or a similar validator. Request body validation is currently manual and incomplete.
+- `.gitignore` cleanup. `dist`, generated Prisma files, and environment files may not be fully ignored.
+- Automated tests. No backend test suite exists yet.
+- Reminder delivery hardening. The reminder job exists, but API documentation only covers CRUD endpoints.
+- UI polish pass. This comes after the functional frontend is working.
 
 ---
 
 ## Notes For Frontend Development
 
-- Never hardcode `http://localhost:5000` — always use `process.env.NEXT_PUBLIC_API_URL`
-- Never send a userId from the frontend — the backend reads it from the Clerk token
-- The `requireUser` middleware runs before every protected route and attaches the local DB user to the request
-- All timestamps are UTC — convert to local timezone for display
-- Resume upload uses FormData, not JSON — do not set Content-Type header manually
-- The `jobTitle` field is NOT called `role` — use the exact field names in this document
-- The `dateApplied` field is NOT called `appliedAt` — use the exact field names in this document
-- The `isSent` field on Reminder is NOT called `sent`
+- Never hardcode `http://localhost:5000`; always use `process.env.NEXT_PUBLIC_API_URL`.
+- Never send `userId` from the frontend. The backend reads the user from the Clerk token and local database.
+- Call `POST /api/user/sync` after sign in before calling routes protected by `requireUser`.
+- The `requireUser` middleware attaches the local DB user to the request for protected routes.
+- All timestamps are UTC; convert to local timezone for display.
+- Resume upload uses `FormData`, not JSON. Do not set the `Content-Type` header manually for multipart upload.
+- Uploading a new resume deletes saved resume analyses. Refresh any resume-analysis UI after upload.
+- The `jobTitle` field is not called `role`.
+- The `dateApplied` field is not called `appliedAt`.
+- The `isSent` field on `Reminder` is not called `sent`.
+- Removed AI interview endpoints should not be called: `/api/ai/interview-prep`, `/api/ai/save-answers`, and `/api/ai/answers/:appId`.

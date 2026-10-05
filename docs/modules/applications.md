@@ -1,17 +1,31 @@
 # Applications Module
 
-Status: Built — UI redesign pending
-Last updated: September 2026
+Status: Built
+Last updated: October 2026
 
 ## 1. Module Overview
 
-The applications module covers the applications list, create application, and application detail pages; the detail page also contains Resume Analysis, Interview Prep, and reminder creation. All of these features use the authenticated application, AI, and reminder endpoints described below.
+The applications module covers the applications list, create application, and application detail pages. The detail page also contains AI Resume Fit analysis and reminder creation.
+
+Current important backend change: the old Interview Prep feature has been removed from active source code. The AI surface is now resume-to-job analysis backed by a saved `ResumeAnalysis` record per application.
 
 ---
 
 ## 2. Backend API Contract
 
-All routes in this section require `Authorization: Bearer <token>`. Get a fresh token with `const token = await getToken()` before each request. A missing or invalid token returns `401 { "error": "Unauthorized" }`; a valid Clerk token without a local user returns `401 { "error": "User not found. Please sync first." }`.
+All routes in this section require `Authorization: Bearer <token>`. Get a fresh token with `const token = await getToken()` before each request.
+
+A missing or invalid token returns:
+
+```json
+{ "error": "Unauthorized" }
+```
+
+A valid Clerk token without a local user returns:
+
+```json
+{ "error": "User not found. Please sync first." }
+```
 
 ### Application values
 
@@ -24,7 +38,7 @@ ApplicationSource: LINKED_IN | NAUKARI | REFERAL | COLDEMAIL | SOCIAL_MEDIA | OT
 
 ### POST /api/applications
 
-Create an application. `companyName`, `jobTitle`, and `source` are required. `jobDescription`, `notes`, and `dateApplied` are optional; `dateApplied` defaults to now.
+Create an application. `companyName`, `jobTitle`, and `source` are required. `jobDescription`, `notes`, and `dateApplied` are optional. If `jobDescription` is omitted, the backend stores an empty string. If `dateApplied` is omitted, it defaults to the current server time.
 
 ```json
 {
@@ -57,11 +71,16 @@ Response `201`:
 }
 ```
 
-The service automatically creates an `APPLIED` `StatusHistory` record. Errors: `400 { "error": "companyName, jobTitle, and source are required" }`; unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message.
+The service automatically creates an `APPLIED` `StatusHistory` record.
+
+Errors:
+
+- `400 { "error": "companyName, jobTitle, and source are required" }`
+- unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message
 
 ### GET /api/applications
 
-No request body. Applications are ordered by `dateApplied` descending and include `statusHistory`.
+No request body. Applications are ordered by `dateApplied` descending and include `statusHistory`, ordered newest first.
 
 Response `200`:
 
@@ -69,31 +88,29 @@ Response `200`:
 {
   "applications": [
     {
-      "id": "...",
+      "id": "cmsyideb30007ncphs5gpgeph",
+      "userId": "cmp07oqw40000r9w593fvr195",
       "companyName": "Google",
       "jobTitle": "Backend Engineer",
-      "jobDescription": "...",
+      "jobDescription": "Design and build scalable backend systems...",
       "status": "APPLIED",
       "source": "LINKED_IN",
       "dateApplied": "2026-08-20T00:00:00.000Z",
-      "notes": "...",
-      "createdAt": "...",
-      "updatedAt": "...",
-      "userId": "...",
+      "notes": "Referral from college senior",
+      "createdAt": "2026-08-20T10:17:03.663Z",
+      "updatedAt": "2026-08-20T10:17:03.663Z",
       "statusHistory": [
         {
-          "id": "...",
-          "applicationId": "...",
+          "id": "cmt0history0001",
+          "applicationId": "cmsyideb30007ncphs5gpgeph",
           "status": "APPLIED",
-          "createdAt": "..."
+          "createdAt": "2026-08-20T10:17:03.663Z"
         }
       ]
     }
   ]
 }
 ```
-
-Unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message.
 
 ### GET /api/applications/:id
 
@@ -104,26 +121,33 @@ Response `200`:
 ```json
 {
   "application": {
-    "id": "...",
+    "id": "cmsyideb30007ncphs5gpgeph",
+    "userId": "cmp07oqw40000r9w593fvr195",
     "companyName": "Google",
     "jobTitle": "Backend Engineer",
-    "jobDescription": "...",
+    "jobDescription": "Design and build scalable backend systems...",
     "status": "SCREENING",
     "source": "LINKED_IN",
-    "dateApplied": "...",
-    "notes": "...",
-    "createdAt": "...",
-    "updatedAt": "...",
-    "userId": "...",
+    "dateApplied": "2026-08-20T00:00:00.000Z",
+    "notes": "Referral from college senior",
+    "createdAt": "2026-08-20T10:17:03.663Z",
+    "updatedAt": "2026-08-21T09:00:00.000Z",
     "statusHistory": [
-      { "id": "...", "applicationId": "...", "status": "SCREENING", "createdAt": "..." },
-      { "id": "...", "applicationId": "...", "status": "APPLIED", "createdAt": "..." }
+      {
+        "id": "cmt0history0002",
+        "applicationId": "cmsyideb30007ncphs5gpgeph",
+        "status": "SCREENING",
+        "createdAt": "2026-08-21T09:00:00.000Z"
+      }
     ]
   }
 }
 ```
 
-Errors: `404 { "error": "Application not found" }`; unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message.
+Errors:
+
+- `404 { "error": "Application not found" }`
+- unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message
 
 ### PUT /api/applications/:id
 
@@ -133,7 +157,7 @@ All body fields are optional; send only fields that change.
 {
   "companyName": "Google",
   "jobTitle": "Senior Backend Engineer",
-  "jobDescription": "...",
+  "jobDescription": "Updated job description...",
   "source": "LINKED_IN",
   "status": "SCREENING",
   "notes": "Updated notes",
@@ -141,7 +165,14 @@ All body fields are optional; send only fields that change.
 }
 ```
 
-Response `200` is `{ "application": { ... } }`, using the full application shape from `GET /api/applications/:id`, including `statusHistory`. When `status` changes, the service automatically creates a new `StatusHistory` record. Errors: `404 { "error": "Application not found" }`; unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message.
+Response `200` is `{ "application": { ... } }`, using the full application shape from `GET /api/applications/:id`, including `statusHistory`.
+
+When `status` changes, the service automatically creates a new `StatusHistory` record.
+
+Errors:
+
+- `404 { "error": "Application not found" }`
+- unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message
 
 ### DELETE /api/applications/:id
 
@@ -153,11 +184,16 @@ Response `200`:
 { "message": "Application deleted successfully" }
 ```
 
-Errors: `404 { "error": "Application not found" }`; unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message.
+Errors:
+
+- `404 { "error": "Application not found" }`
+- unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message
+
+Deleting an application also removes its related `StatusHistory`, `ResumeAnalysis`, and `Reminder` data.
 
 ### POST /api/ai/analyze-resume
 
-Compare the signed-in user's stored resume text against an application's job description.
+Generate or refresh resume analysis for one application. The backend compares the signed-in user's stored `resumeText` against the application's `jobDescription`.
 
 ```json
 { "applicationId": "cmsyideb30007ncphs5gpgeph" }
@@ -168,108 +204,87 @@ Response `200`:
 ```json
 {
   "analysis": {
+    "id": "cmt0analysis0001",
+    "applicationId": "cmsyideb30007ncphs5gpgeph",
     "matchScore": 72,
-    "missingKeywords": ["Docker", "Kubernetes", "Redis"],
-    "suggestions": [
-      "Highlight your Node.js experience in the summary",
-      "Add a projects section showing distributed systems work"
-    ]
+    "missingKeywords": ["docker", "kubernetes", "redis"],
+    "strongestPoints": [
+      "Backend API experience aligns well with the role.",
+      "Database work is relevant to the job description."
+    ],
+    "redFlags": [
+      "The resume does not clearly show production cloud deployment experience."
+    ],
+    "recruiterTake": "A promising backend candidate, but the resume should show stronger evidence of cloud and scaling experience.",
+    "suggestions": [],
+    "createdAt": "2026-09-20T01:22:57.000Z",
+    "updatedAt": "2026-09-20T01:22:57.000Z"
   }
 }
 ```
 
-Errors: `400 { "error": "applicationId is required" }`; `400 { "error": "Resume not found. Please upload your resume first." }`; `400 { "error": "Application not found." }`; `400 { "error": "No job description found for this application." }`; unexpected non-Error failures return `500 { "error": "Internal server error" }`.
+Behavior:
 
-### POST /api/ai/interview-prep
+- Missing keywords are computed locally from the job description and capped at 10.
+- Gemini generates `matchScore`, `strongestPoints`, `redFlags`, and `recruiterTake`.
+- The result is saved with an upsert, so reanalysis overwrites the previous `ResumeAnalysis` for the same application.
+- `suggestions` currently returns an empty array and is reserved for future use.
 
-Generate and persist questions for an application.
+Errors:
 
-```json
-{ "applicationId": "cmsyideb30007ncphs5gpgeph" }
-```
+- `400 { "error": "applicationId is required" }`
+- `400 { "error": "Resume not found. Please upload your resume first." }`
+- `400 { "error": "Application not found." }`
+- `400 { "error": "No job description found for this application." }`
+- unexpected non-Error failures return `500 { "error": "Internal server error" }`
 
-Response `201`:
+### GET /api/ai/resume-analysis/:appId
+
+Fetch the saved analysis for an application owned by the signed-in user.
+
+Response `200` when analysis exists:
 
 ```json
 {
-  "interviewPrep": {
-    "interviewId": "cmsz36kto0001t0mfds7zwkpf",
-    "questions": [
-      {
-        "id": "cmsz36lxc0003t0mfsftdvet6",
-        "question": "What is the difference between horizontal and vertical scaling?",
-        "userAnswer": null,
-        "aiInterviewId": "cmsz36kto0001t0mfds7zwkpf",
-        "questionNumber": 1,
-        "createdAt": "...",
-        "updatedAt": "..."
-      }
-    ]
+  "analysis": {
+    "id": "cmt0analysis0001",
+    "applicationId": "cmsyideb30007ncphs5gpgeph",
+    "matchScore": 72,
+    "missingKeywords": ["docker", "kubernetes", "redis"],
+    "strongestPoints": [
+      "Backend API experience aligns well with the role."
+    ],
+    "redFlags": [
+      "The resume does not clearly show production cloud deployment experience."
+    ],
+    "recruiterTake": "A promising backend candidate, but the resume should show stronger evidence of cloud and scaling experience.",
+    "suggestions": [],
+    "createdAt": "2026-09-20T01:22:57.000Z",
+    "updatedAt": "2026-09-20T01:22:57.000Z"
   }
 }
 ```
 
-Errors: `400 { "error": "applicationId is required" }`; `400 { "error": "Application not found." }`; `400 { "error": "No job description found for this application." }`; unexpected non-Error failures return `500 { "error": "Internal server error" }`.
-
-### POST /api/ai/save-answers
-
-Save one or more non-empty answers.
+Response `200` when no saved analysis exists:
 
 ```json
-{
-  "answers": [
-    {
-      "questionId": "cmsz36lxc0003t0mfsftdvet6",
-      "answer": "Horizontal scaling adds more machines..."
-    },
-    {
-      "questionId": "cmsz36nih000ft0mfdcn94jc0",
-      "answer": "Database indexing creates a data structure..."
-    }
-  ]
-}
+{ "analysis": null }
 ```
 
-Response `200`:
+Errors:
 
-```json
-{ "saved": 2 }
-```
+- `400 { "error": "Application not found." }`
+- unexpected non-Error failures return `500 { "error": "Internal server error" }`
 
-Errors: `400 { "error": "answers array is required" }` when `answers` is missing, not an array, or empty; unexpected failures return `500 { "error": "Internal server error" }`.
+Important: uploading a new resume from the profile module deletes saved analyses for all of the user's applications. After a resume upload, this endpoint returns `null` until analysis is run again.
 
-### GET /api/ai/answers/:appId
+### Removed AI endpoints
 
-No request body. The endpoint returns every saved interview session for the application, ordered by newest interview first, with questions ordered by `questionNumber` ascending.
+These endpoints are no longer present in the current source code and must not be called:
 
-Response `200`:
-
-```json
-{
-  "interviews": [
-    {
-      "id": "cmsz36kto0001t0mfds7zwkpf",
-      "applicationId": "cmsyideb30007ncphs5gpgeph",
-      "overallScore": null,
-      "overallFeedback": null,
-      "createdAt": "...",
-      "updatedAt": "...",
-      "questions": [
-        {
-          "id": "cmsz36lxc0003t0mfsftdvet6",
-          "question": "What is the difference between horizontal and vertical scaling?",
-          "userAnswer": "Horizontal scaling adds more machines...",
-          "questionNumber": 1,
-          "createdAt": "...",
-          "updatedAt": "..."
-        }
-      ]
-    }
-  ]
-}
-```
-
-Errors: `400 { "error": "Application not found." }`; unexpected non-Error failures return `500 { "error": "Internal server error" }`.
+- `POST /api/ai/interview-prep`
+- `POST /api/ai/save-answers`
+- `GET /api/ai/answers/:appId`
 
 ### POST /api/reminders
 
@@ -294,13 +309,17 @@ Response `201`:
     "reminderDate": "2026-08-25T00:00:00.000Z",
     "isSent": false,
     "notes": "Follow up on application status",
-    "createdAt": "...",
-    "updatedAt": "..."
+    "createdAt": "2026-08-20T10:17:03.663Z",
+    "updatedAt": "2026-08-20T10:17:03.663Z"
   }
 }
 ```
 
-Errors: `400 { "error": "applicationId and reminderDate are required" }`; `400 { "error": "Application not found." }`; unexpected non-Error failures return `500 { "error": "Internal server error" }`.
+Errors:
+
+- `400 { "error": "applicationId and reminderDate are required" }`
+- `400 { "error": "Application not found." }`
+- unexpected non-Error failures return `500 { "error": "Internal server error" }`
 
 ### PUT /api/reminders/:id
 
@@ -313,24 +332,13 @@ Errors: `400 { "error": "applicationId and reminderDate are required" }`; `400 {
 }
 ```
 
-Response `200`:
+Response `200` is `{ "reminder": { ... } }`.
 
-```json
-{
-  "reminder": {
-    "id": "...",
-    "applicationId": "...",
-    "userId": "...",
-    "reminderDate": "2026-09-01T00:00:00.000Z",
-    "isSent": false,
-    "notes": "Interview scheduled for 3pm",
-    "createdAt": "...",
-    "updatedAt": "..."
-  }
-}
-```
+Errors:
 
-Errors: `400 { "error": "reminderDate is required" }`; `400 { "error": "Reminder not found." }`; unexpected non-Error failures return `500 { "error": "Internal server error" }`.
+- `400 { "error": "reminderDate is required" }`
+- `400 { "error": "Reminder not found." }`
+- unexpected non-Error failures return `500 { "error": "Internal server error" }`
 
 ### DELETE /api/reminders/:id
 
@@ -342,13 +350,16 @@ Response `200`:
 { "message": "Reminder deleted successfully" }
 ```
 
-Errors: `400 { "error": "Reminder not found." }`; unexpected non-Error failures return `500 { "error": "Internal server error" }`.
+Errors:
+
+- `400 { "error": "Reminder not found." }`
+- unexpected non-Error failures return `500 { "error": "Internal server error" }`
 
 ---
 
 ## 3. Shared Utilities
 
-`STATUS_LABELS`, `SOURCE_LABELS`, and `formatDate` are currently duplicated between the list and detail pages. `[UI Polish Phase Task]` Extract them to `lib/applicationUtils.ts`.
+`STATUS_LABELS`, `SOURCE_LABELS`, `formatDate`, `daysSince`, and status color maps currently live in the application pages. Extracting them to a shared utility remains a cleanup task.
 
 ```ts
 const STATUS_LABELS: Record<ApplicationStatus, string> = {
@@ -360,7 +371,7 @@ const STATUS_LABELS: Record<ApplicationStatus, string> = {
   REJECTED: "Rejected",
 }
 
-const SOURCE_LABELS: Record<ApplicationSource, string> = {
+const SOURCE_LABELS: Record<string, string> = {
   LINKED_IN: "LinkedIn",
   NAUKARI: "Naukri",
   REFERAL: "Referral",
@@ -385,28 +396,30 @@ function formatDate(dateStr: string) {
 ### Location
 
 ```text
-app/(protected)/applications/page.tsx
+frontend/app/(protected)/applications/page.tsx
 ```
 
 ### Purpose and content
 
-The list is the user's application index. It renders one bordered row per application, ordered by the backend's descending `dateApplied` order. Each row shows the company name, job title, source label, `en-IN` formatted date, and color-coded status pill.
+The list is the user's application index. It renders one row/card per application, ordered by the backend's descending `dateApplied` order. Each item shows the company name, job title, source label, formatted date, and color-coded status.
 
-| Status | UI color |
+Status color mapping:
+
+| Status | Color family |
 |---|---|
 | APPLIED | blue |
-| SCREENING | yellow |
+| SCREENING | amber |
 | INTERVIEW | purple |
 | ASSIGNMENT | orange |
 | OFFER | green |
-| REJECTED | red |
+| REJECTED | rose/red |
 
 ### States
 
-- Loading: `Loading your applications...`
+- Loading: loading text while the first fetch is in progress.
 - Error: API error message in red.
-- Empty: bordered, centered card with `No applications yet`, `Start tracking by adding your first application.`, and a `+ New Application` button.
-- Populated: a single bordered container of clickable application rows.
+- Empty: empty state that links to creating the first application.
+- Populated: clickable application items.
 
 ### Fetch pattern
 
@@ -417,22 +430,11 @@ const data = await getApplications(token)
 setApplications(data.applications)
 ```
 
-This is one `GET /api/applications` call on mount. The API includes `statusHistory`; the list does not render it.
-
-### Source labels
-
-| Enum value | Display label |
-|---|---|
-| `LINKED_IN` | LinkedIn |
-| `NAUKARI` | Naukri |
-| `REFERAL` | Referral |
-| `COLDEMAIL` | Cold Email |
-| `SOCIAL_MEDIA` | Social Media |
-| `OTHER_JOB_APPS` | Other |
+This is one `GET /api/applications` call on mount. The API includes `statusHistory`; the list page does not need to render the full history.
 
 ### Navigation
 
-`+ New Application` navigates to `/applications/new`. Clicking an application row navigates to `/applications/:id`.
+The new-application action navigates to `/applications/new`. Clicking an application navigates to `/applications/:id`.
 
 ---
 
@@ -441,7 +443,7 @@ This is one `GET /api/applications` call on mount. The API includes `statusHisto
 ### Location
 
 ```text
-app/(protected)/applications/new/page.tsx
+frontend/app/(protected)/applications/new/page.tsx
 ```
 
 ### Purpose and fields
@@ -453,7 +455,7 @@ The page creates one application and then routes directly to its detail page.
 | `companyName` | text | Yes | `""` |
 | `jobTitle` | text | Yes | `""` |
 | `source` | select | Yes | `LINKED_IN` |
-| `dateApplied` | date | No | `new Date().toISOString().split("T")[0]` |
+| `dateApplied` | date | No | current date |
 | `jobDescription` | textarea | No | `""` |
 | `notes` | textarea | No | `""` |
 
@@ -461,9 +463,9 @@ The source select contains the six exact `ApplicationSource` values from the sou
 
 ### Validation and submit behavior
 
-Before submitting, require `companyName`, `jobTitle`, and `source`. If any is empty, render `Company name, job title, and source are required.` in red and do not call the API. There is no Zod validation.
+Before submitting, require `companyName`, `jobTitle`, and `source`. If any is empty, render `Company name, job title, and source are required.` in red and do not call the API.
 
-On submit, call `POST /api/applications`. On success, the backend creates the initial `APPLIED` history record and the page redirects to `/applications/${data.application.id}` rather than the list.
+On submit, call `POST /api/applications`. On success, the backend creates the initial `APPLIED` history record and the page redirects to `/applications/${data.application.id}`.
 
 ```ts
 const token = await getToken()
@@ -474,7 +476,7 @@ router.push(`/applications/${data.application.id}`)
 
 ### States
 
-- Submitting: `Save Application` becomes `Saving...` and the button is disabled.
+- Submitting: save button switches to saving state and is disabled.
 - Error: client validation or API error is shown in red above the action buttons.
 - Cancel: calls `router.back()`.
 
@@ -485,83 +487,95 @@ router.push(`/applications/${data.application.id}`)
 ### Location and purpose
 
 ```text
-app/(protected)/applications/[id]/page.tsx
+frontend/app/(protected)/applications/[id]/page.tsx
 ```
 
-This is the single source of truth for an application: its status, full history, notes, job description, AI features, and reminder creation all render here.
+This is the single source of truth for an application: its status, full history, notes, job description, AI Resume Fit, and reminder creation all render here.
 
-### Render order
+### Current layout
 
-1. **Back button** — `← Back to applications`, linking to `/applications`.
-2. **Header** — company name as title, job title as subtitle, and a delete control on the right.
-3. **Meta row** — source label and `formatDate(application.dateApplied)`.
-4. **Inline error** — shown for status, notes, or delete errors without replacing the page.
-5. **Status section** — all six status pills. The current status has its matching color; other pills are neutral. Clicking another status waits for the API response before rendering the update.
-6. **History section** — every `statusHistory` record, most recent first, with status badge and date.
-7. **Notes section** — textarea initialized from `application.notes ?? ""`; its save button is disabled unless `notes !== (application.notes ?? "")`.
-8. **Job Description section** — pre-wrapped text, rendered only when `application.jobDescription` is non-empty.
-9. **AI Features** — Resume Analysis and Interview Prep, specified in Section 7.
-10. **Reminders** — reminder creation, specified in Section 8.
+The page is organized into three tabs:
+
+- `overview`: pipeline, status controls, status history, notes, application details, and job description.
+- `ai`: saved resume analysis and reanalysis controls.
+- `reminder`: reminder creation and reminder guidance.
+
+The header remains sticky and includes back navigation, company name, job title, current status badge, and overflow actions.
 
 ### Initial API calls
 
-On mount, load the application and saved interview sessions in parallel:
+On mount, load the application and saved resume analysis in parallel:
 
 ```ts
-const [appData, answersData] = await Promise.all([
+const [appData, analysisRes] = await Promise.all([
   getApplication(token, id),
-  getAnswers(token, id).catch(() => ({ interviews: [] })),
+  getResumeAnalysis(token, id).catch(() => ({ analysis: null })),
 ])
+
+const app = appData.application
+setApplication(app)
+setNotes(app.notes ?? "")
+setSavedAnalysis(analysisRes.analysis ?? null)
 ```
 
-Set `application` from `appData.application`, initialize `notes` with `app.notes ?? ""`, and use every existing interview question to pre-populate `answers[q.id] = q.userAnswer ?? ""`.
+The saved-analysis fetch intentionally falls back to `{ analysis: null }` so a missing or failed analysis lookup does not prevent the application itself from rendering.
 
 ### Delete flow
 
-1. The user clicks `Delete`.
-2. Replace it inline with `Are you sure?`, `Yes, delete`, and `Cancel`.
+1. The user opens the overflow action and chooses delete.
+2. A confirmation modal asks `Delete this application?`.
 3. `Yes, delete` calls `deleteApplication(token, id)`.
-4. On success, call `router.push("/applications")`.
-5. `Cancel` hides the confirmation. A failed delete surfaces the error, clears `deleting`, and hides the confirmation.
+4. On success, route to `/applications`.
+5. Failure surfaces as the page error and closes the deleting state.
 
 ### Status update flow
 
 1. Ignore the event when there is no application, an update is running, or the selected status is already current.
 2. Call `updateApplication(token, id, { status: newStatus })`.
 3. Replace local application state with `data.application`.
-4. The backend appends a `StatusHistory` record when the status changed.
+4. Show the temporary `Updated` confirmation.
+5. The backend appends a `StatusHistory` record when the status changed.
 
-This is intentionally non-optimistic: the page shows the change only after the response succeeds.
+This is intentionally non-optimistic: the page shows the status change only after the response succeeds.
 
 ### Notes save flow
 
 1. Disable Save Notes when the current content equals `application.notes ?? ""`.
 2. Call `updateApplication(token, id, { notes })`.
 3. Replace local application state with `data.application`.
+4. Show temporary `Saved` feedback.
+
+### Job description display
+
+The overview tab renders the job description only when `application.jobDescription` is non-empty. The page includes an expand control that opens a modal for reading the full job description.
 
 ### Detail page state variables
 
 ```ts
+const [activeTab, setActiveTab] =
+  useState<"overview" | "ai" | "reminder">("overview")
+const [overflowOpen, setOverflowOpen] = useState(false)
+const [jdModalOpen, setJdModalOpen] = useState(false)
+
 const [application, setApplication] = useState<Application | null>(null)
 const [loading, setLoading] = useState(true)
 const [error, setError] = useState<string | null>(null)
 
 const [notes, setNotes] = useState("")
 const [savingNotes, setSavingNotes] = useState(false)
+const [notesSaved, setNotesSaved] = useState(false)
+
 const [updatingStatus, setUpdatingStatus] = useState(false)
+const [statusUpdated, setStatusUpdated] = useState(false)
+
 const [confirmDelete, setConfirmDelete] = useState(false)
 const [deleting, setDeleting] = useState(false)
 
-const [analysis, setAnalysis] = useState<ResumeAnalysis | null>(null)
-const [analyzingResume, setAnalyzingResume] = useState(false)
+const [analyzing, setAnalyzing] = useState(false)
 const [analysisError, setAnalysisError] = useState<string | null>(null)
-
-const [interviews, setInterviews] = useState<AiInterview[]>([])
-const [generatingPrep, setGeneratingPrep] = useState(false)
-const [prepError, setPrepError] = useState<string | null>(null)
-const [answers, setAnswers] = useState<Record<string, string>>({})
-const [savingAnswers, setSavingAnswers] = useState(false)
-const [answersSaved, setAnswersSaved] = useState(false)
+const [savedAnalysis, setSavedAnalysis] = useState<ResumeAnalysis | null>(null)
+const [loadingAnalysis, setLoadingAnalysis] = useState(true)
+const [copied, setCopied] = useState(false)
 
 const [reminderDate, setReminderDate] = useState("")
 const [reminderNotes, setReminderNotes] = useState("")
@@ -575,116 +589,122 @@ const [reminderError, setReminderError] = useState<string | null>(null)
 - Initial load: full-page `Loading...`.
 - Initial-load error: full-page error text in red.
 - Not found: `Application not found.`.
-- Per-operation errors: retain the rendered application and display the error inline.
+- Per-operation errors: retain the rendered application and display the error inline where possible.
 
 ---
 
-## 7. AI Features (lives on detail page)
+## 7. AI Resume Fit
 
-### Resume Analysis
+### Purpose
 
-#### Trigger and pre-check
+AI Resume Fit lives on the application detail page's `ai` tab. It compares the user's currently uploaded resume against the selected application's job description.
 
-`Analyze Resume` triggers the feature. Before any request, check `application.jobDescription`. When it is empty, set `analysisError` to `Add a job description to this application first.` and do not call the API.
+The UI explicitly reminds the user that analysis is based on the currently uploaded resume and links to `/profile` to update the resume. Uploading a new resume deletes saved analyses, so this tab will show the no-analysis state until the user analyses again.
 
-Otherwise, clear `analysis` and `analysisError`, set `analyzingResume`, then call:
+### Initial saved-analysis loading
+
+The detail page calls `GET /api/ai/resume-analysis/:appId` on mount through `getResumeAnalysis(token, id)`. If analysis exists, it is rendered immediately. If the endpoint returns `null`, the tab renders the empty state.
+
+### Trigger and pre-check
+
+`Analyse resume` triggers the feature when there is no saved analysis. `Reanalyse` triggers it when analysis already exists.
+
+Before any request, check `application.jobDescription`. When it is empty, set `analysisError` to `Add a job description to this application first.` and do not call the API.
 
 ```ts
-const data = await analyzeResume(token, id)
-setAnalysis(data.analysis)
+const res = await analyzeResume(token, application.id)
+setSavedAnalysis(res.analysis)
 ```
 
-The exact request and response shapes are in `POST /api/ai/analyze-resume` in Section 2.
+The API saves the result, so the next detail-page mount can load it with `getResumeAnalysis`.
 
-#### Display and persistence
+### Display
 
-- Render `matchScore` as a large bold number with `% match with this job description`.
-- Render `missingKeywords` as red pills.
-- Render `suggestions` as an arrow list.
-- Results are not persisted; each click recomputes them from the current resume and job description.
+When no saved analysis exists:
 
-#### Error handling
+- Show `No analysis yet`.
+- Show `Compare your resume against this job description`.
+- Show `Analyse resume`, disabled while analysing.
+- Surface `analysisError` if present.
+
+When saved analysis exists:
+
+- Match score card with score out of 100, progress bar, and `scoreLabel`.
+- Reanalyse button.
+- Recruiter Take card.
+- Strongest Points list with success icon.
+- Missing Keywords pills when the array is non-empty.
+- Red Flags list when the array is non-empty.
+- Copy improvement prompt button.
+- Analysed date from `savedAnalysis.createdAt`.
+
+### Copy improvement prompt
+
+The `Copy improvement prompt` action builds a prompt from the current application and saved analysis:
+
+```ts
+I applied for a ${application.jobTitle} role at ${application.companyName}.
+Match Score: ${savedAnalysis.matchScore}/100
+Missing Keywords: ${savedAnalysis.missingKeywords.join(", ")}
+Red Flags: ${savedAnalysis.redFlags.join(", ")}
+Strongest Points: ${savedAnalysis.strongestPoints.join(", ")}
+Recruiter Take: ${savedAnalysis.recruiterTake}
+
+Please help me improve my resume to address these gaps.
+```
+
+It writes to `navigator.clipboard`, sets `copied` to true, then resets that feedback after 2 seconds.
+
+### Error handling
 
 | Condition | UI behavior |
 |---|---|
 | No job description | `Add a job description to this application first.`; no API call |
 | Backend resume error | `No resume uploaded. Upload one from your profile page.` |
-| Any other API error | Render the API error message verbatim |
+| Other API error | Render the API error message verbatim |
 
-### Interview Prep
+### Type definition
 
-#### Trigger and on-mount behavior
-
-Use `Generate Questions` when no questions exist, then `Regenerate` once questions exist. Generating a new set replaces the questions shown in the component with the newly returned set and resets the answer confirmation.
-
-On mount, `getAnswers(token, id)` runs in the `Promise.all` shown in Section 6. The component retains the `.catch(() => ({ interviews: [] }))` pattern so a failed answers request is treated as an empty interview state. For returned sessions, pre-populate the `answers` map from saved `userAnswer` values.
-
-#### Generate questions
+`ResumeAnalysis` is defined in `frontend/app/types/index.ts`:
 
 ```ts
-const data = await generateInterviewPrep(token, id)
-```
-
-The request and response shapes are in `POST /api/ai/interview-prep` in Section 2. Construct the displayed session from `data.interviewPrep.interviewId` and `data.interviewPrep.questions`; initialize every new question's answer as `q.userAnswer ?? ""`.
-
-#### Save answers
-
-Filter blank answers before saving:
-
-```ts
-const answersPayload = Object.entries(answers)
-  .filter(([, answer]) => answer.trim() !== "")
-  .map(([questionId, answer]) => ({ questionId, answer }))
-
-await saveAnswers(token, answersPayload)
-```
-
-The request and response shapes are in `POST /api/ai/save-answers` in Section 2.
-
-#### Display and error handling
-
-Render questions in `questionNumber` ascending order as a numbered list. Each question has a textarea. Render one Save Answers button below the list, and show `Answers saved.` after a successful save; hide that confirmation when generating a replacement set.
-
-| Operation | Failure behavior |
-|---|---|
-| Generate Questions | Set `prepError` to the API error message or `Failed to generate questions` |
-| Save Answers | Set `prepError` to the API error message or `Failed to save answers` |
-
-### Prerequisites and type definition
-
-Resume Analysis requires an uploaded resume. Without one, the backend returns the resume-not-found error shown above. Interview Prep uses the application's job description and can run without a resume.
-
-```ts
-interface ResumeAnalysis {
+export interface ResumeAnalysis {
+  id: string
+  applicationId: string
   matchScore: number
   missingKeywords: string[]
+  strongestPoints: string[]
+  redFlags: string[]
+  recruiterTake: string
   suggestions: string[]
+  createdAt: string
+  updatedAt: string
 }
 ```
 
-`ResumeAnalysis` is defined inline in the detail page.
-
 ---
 
-## 8. Reminders (lives on detail page)
+## 8. Reminders
 
 ### How it works
 
-The user picks a date and optional note, then clicks `Set Reminder`. `POST /api/reminders` stores the record with `isSent: false`. A daily 9am cron job finds unsent reminders whose `reminderDate` is today in UTC, sends an HTML email through Resend from `reminders@applyntrack.online`, then marks each record `isSent: true` so it cannot be sent twice.
+The user picks a date and optional note, then clicks `Set reminder`. `POST /api/reminders` stores the record with `isSent: false`.
+
+A daily 9am cron job finds unsent reminders whose `reminderDate` is today in UTC, sends an HTML email through Resend from `reminders@applyntrack.online`, then marks each record `isSent: true` so it cannot be sent twice.
 
 ### UI fields and states
 
 | Field | Input | Required |
 |---|---|---|
 | Reminder Date | date | Yes |
-| Notes | text | No |
+| Note | textarea | No |
 
 The date input has `min` set to today's date. Before the API call, a missing date sets `reminderError` to `Please select a reminder date.`.
 
 | State | UI behavior |
 |---|---|
 | Missing date | `Please select a reminder date.` in red |
-| Saving | `Set Reminder` becomes `Saving...` and is disabled |
+| Saving | `Set reminder` becomes `Saving...` and is disabled |
 | Success | `Reminder set.` in green; clear `reminderDate` and `reminderNotes` |
 | Error | Render the API error message in red |
 
@@ -698,13 +718,17 @@ await createReminder(token, {
 })
 ```
 
-The exact request, response, and errors are in `POST /api/reminders` in Section 2. The backend also exposes update and delete contracts in Section 2, though this detail-page UI currently creates reminders only.
+The detail-page UI currently creates reminders only. The backend exposes update and delete reminder endpoints, but the page has no reminder list endpoint to support full management yet.
+
+### Upcoming reminders placeholder
+
+The reminder tab shows an `Upcoming reminders` card, but it is a static empty placeholder because there is no list-reminders endpoint currently.
 
 ### Important: UTC date handling
 
 The backend stores and queries `reminderDate` in UTC. IST is UTC+5:30, so a date that is today in IST may already be tomorrow in UTC depending on the time of day.
 
-**In practice:** when setting a same-day reminder late at night IST, use the next calendar day so the cron job picks it up correctly.
+In practice: when setting a same-day reminder late at night IST, use the next calendar day so the cron job picks it up correctly.
 
 ### Email and cron
 
@@ -720,13 +744,11 @@ It is configured in `backend/src/jobs/reminderJob.ts` and started by `startRemin
 
 ## 9. Known Limitations
 
-- `STATUS_LABELS`, `SOURCE_LABELS`, and `formatDate` are duplicated across list and detail pages; extracting them to `lib/applicationUtils.ts` is a UI polish phase task.
-- The list has no pagination, filter, or search.
-- `ResumeAnalysis` is inline in the detail page rather than `types/index.ts`.
-- The notes save button compares against `application.notes ?? ""`; when notes is `null` and the textarea is empty, it remains correctly disabled.
-- Resume Analysis results disappear on refresh by design because they are not persisted.
-- Regenerating interview questions leaves the previous `AiInterview` record in the database but no longer shows it in the component.
-- The detail-page answers fetch is swallowed as an empty state through `.catch(() => ({ interviews: [] }))`.
-- The reminder UI cannot view, edit, or delete existing reminders, although update and delete backend endpoints exist.
+- `STATUS_LABELS`, `SOURCE_LABELS`, date helpers, and status color maps are still local to application pages.
+- The applications list has no pagination, filter, or search.
+- The reminder UI cannot view, edit, or delete existing reminders because there is no list-reminders endpoint.
+- The upcoming reminders card is currently a placeholder.
 - UTC/IST mismatch can cause same-day reminders set late at night to be missed.
 - If the backend server is down at 9am, that day's reminders are missed because there is no retry mechanism.
+- `suggestions` is part of the `ResumeAnalysis` type but currently returns an empty array.
+- Saved resume analyses are invalidated after resume upload; the application detail page should be refreshed or revisited after updating a resume.
