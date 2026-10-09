@@ -4,6 +4,7 @@ import { useAuth, useUser } from "@clerk/nextjs"
 import { useEffect, useState } from "react"
 import { getDashboardStats, getApplications } from "../../lib/api"
 import { DashboardStats, Application, ApplicationStatus } from "../../types"
+import CompanyLogo from "../../components/CompanyLogo"
 
 const PIPELINE_STAGES: ApplicationStatus[] = [
   "APPLIED",
@@ -113,6 +114,7 @@ export default function DashboardPage() {
       (app.statusHistory ?? []).map((entry) => ({
         ...entry,
         companyName: app.companyName,
+        companyDomain: app.companyDomain,
         jobTitle: app.jobTitle,
         appId: app.id,
       }))
@@ -281,13 +283,16 @@ export default function DashboardPage() {
                     i < recentActivity.length - 1 ? " border-b border-[#F0F1F4]" : ""
                   }`}
                 >
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-semibold text-[#111827] truncate">
-                      {entry.companyName}
-                    </p>
-                    <p className="text-[11px] text-[#6B7280] mt-[1px] truncate">
-                      {entry.jobTitle}
-                    </p>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <CompanyLogo domain={entry.companyDomain} name={entry.companyName} size={28} />
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-[#111827] truncate">
+                        {entry.companyName}
+                      </p>
+                      <p className="text-[11px] text-[#6B7280] mt-[1px] truncate">
+                        {entry.jobTitle}
+                      </p>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span
@@ -450,13 +455,16 @@ export default function DashboardPage() {
                       i < staleApps.length - 1 ? " border-b border-[#F0F1F4]" : ""
                     }`}
                   >
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-[#111827] truncate">
-                        {app.companyName}
-                      </p>
-                      <p className="text-[11px] text-[#6B7280] mt-[1px] truncate">
-                        {app.jobTitle}
-                      </p>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <CompanyLogo domain={app.companyDomain} name={app.companyName} size={28} />
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold text-[#111827] truncate">
+                          {app.companyName}
+                        </p>
+                        <p className="text-[11px] text-[#6B7280] mt-[1px] truncate">
+                          {app.jobTitle}
+                        </p>
+                      </div>
                     </div>
                     <span className="flex-shrink-0 bg-[#B91C1C] text-white text-[10px] font-bold px-[7px] py-[2px] rounded-full leading-[1.6] whitespace-nowrap">
                       {days}d

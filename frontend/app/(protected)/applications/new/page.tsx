@@ -5,6 +5,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { createApplication } from "../../../lib/api"
 import { ApplicationSource } from "../../../types"
+import CompanySearchInput from "../../../components/CompanySearchInput"
 
 const SOURCES: { value: ApplicationSource; label: string }[] = [
   { value: "LINKED_IN", label: "LinkedIn" },
@@ -21,6 +22,7 @@ export default function NewApplicationPage() {
 
   const [form, setForm] = useState({
     companyName: "",
+    companyDomain: "",
     jobTitle: "",
     jobDescription: "",
     source: "LINKED_IN" as ApplicationSource,
@@ -46,7 +48,10 @@ export default function NewApplicationPage() {
       setError(null)
       const token = await getToken()
       if (!token) return
-      const data = await createApplication(token, form)
+      const data = await createApplication(token, {
+        ...form,
+        companyDomain: form.companyDomain || undefined,
+      })
       router.push(`/applications/${data.application.id}`)
     } catch (err: any) {
       setError(err.message)
@@ -79,12 +84,15 @@ export default function NewApplicationPage() {
               <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
                 Company name<span className="text-[#EF4444] ml-0.5">*</span>
               </label>
-              <input
-                name="companyName"
+              <CompanySearchInput
                 value={form.companyName}
-                onChange={handleChange}
-                placeholder="e.g. Google"
-                className="w-full text-sm text-[#111827] placeholder-[#9CA3AF] bg-white border border-[#E5E7EB] rounded-lg px-3.5 py-2.5 outline-none transition-colors focus:border-[#FF6B35] focus:ring-4 focus:ring-[#FF6B35]/10"
+                domain={form.companyDomain}
+                onChange={(name) =>
+                  setForm((prev) => ({ ...prev, companyName: name, companyDomain: "" }))
+                }
+                onSelect={({ name, domain }) =>
+                  setForm((prev) => ({ ...prev, companyName: name, companyDomain: domain }))
+                }
               />
             </div>
 
