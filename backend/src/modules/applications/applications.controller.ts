@@ -24,8 +24,15 @@ export const createApplicationController = async (
   try {
     const userId = getLocalUserId(req as AuthenticatedRequest);
 
-    const { companyName, jobTitle, jobDescription, source, notes, dateApplied } =
-      req.body;
+    const {
+      companyName,
+      companyDomain,
+      jobTitle,
+      jobDescription,
+      source,
+      notes,
+      dateApplied,
+    } = req.body;
 
     if (!companyName || !jobTitle || !source) {
       res.status(400).json({
@@ -36,6 +43,7 @@ export const createApplicationController = async (
 
     const application = await createApplication(userId, {
       companyName,
+      companyDomain: companyDomain || undefined,
       jobTitle,
       jobDescription,
       source,
@@ -99,6 +107,7 @@ export const updateApplicationController = async (
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const {
       companyName,
+      companyDomain,
       jobTitle,
       jobDescription,
       source,
@@ -109,6 +118,7 @@ export const updateApplicationController = async (
 
     const application = await updateApplication(userId, id, {
       companyName,
+      companyDomain: companyDomain || undefined,
       jobTitle,
       jobDescription,
       source,

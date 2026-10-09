@@ -7,6 +7,7 @@ import prisma from "../../config/db";
 
 type CreateApplicationInput = {
   companyName: string;
+  companyDomain?: string;
   jobTitle: string;
   jobDescription?: string;
   source: ApplicationSource;
@@ -16,6 +17,7 @@ type CreateApplicationInput = {
 
 type UpdateApplicationInput = {
   companyName?: string;
+  companyDomain?: string;
   jobTitle?: string;
   jobDescription?: string;
   source?: ApplicationSource;
@@ -35,6 +37,7 @@ export const createApplication = async (
       data: {
         userId,
         companyName: data.companyName,
+        companyDomain: data.companyDomain,
         jobTitle: data.jobTitle,
         jobDescription: data.jobDescription ?? "",
         source: data.source,
@@ -114,6 +117,8 @@ export const updateApplication = async (
     const updateData: Prisma.ApplicationUpdateManyMutationInput = {};
 
     if (data.companyName !== undefined) updateData.companyName = data.companyName;
+    if (data.companyDomain !== undefined)
+      updateData.companyDomain = data.companyDomain;
     if (data.jobTitle !== undefined) updateData.jobTitle = data.jobTitle;
     if (data.jobDescription !== undefined)
       updateData.jobDescription = data.jobDescription;
