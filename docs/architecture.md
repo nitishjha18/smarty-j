@@ -1,7 +1,7 @@
 # ApplynTrack — Technical Architecture
 
 **Document location:** `docs/architecture.md`
-**Last updated:** August 2026
+**Last updated:** October 2026
 **Author:** Nitish Jha
 
 ---
@@ -46,6 +46,7 @@ Express REST API (Node.js)
 | Language | TypeScript | Type safety across the frontend-backend boundary. Field name mismatches become compile errors. |
 | Styling | Tailwind CSS 4 | Utility-first, no context switching between CSS files and components. |
 | Auth | Clerk (`@clerk/nextjs`) | Handles Google OAuth, token issuance, session management, and route protection with minimal configuration. |
+| Company logos | Brandfetch (Logo API + Brand Search API) | Free tier with no attribution requirement. Returned logos for the large Indian companies tested. Called directly from the browser. See Section 6b. |
 
 ### Backend
 
@@ -76,6 +77,8 @@ Auth: `useAuth()` provides `getToken()`. Always call fresh before each request �
 
 Component structure:
 - `components/Sidebar.tsx` — shared across all protected pages via the protected layout
+- `components/CompanyLogo.tsx` — company logo with letter-avatar fallback, used on the board, detail page, dashboard, and the create form
+- `components/CompanySearchInput.tsx` — company name autocomplete on the create page, backed by the Brandfetch Brand Search API
 - All pages are client components (`"use client"`)
 - No server components in use currently
 
@@ -105,6 +108,7 @@ Application
   id              String            @id @default(cuid())
   userId          String
   companyName     String
+  companyDomain   String?
   jobTitle        String
   jobDescription  String
   status          ApplicationStatus @default(APPLIED)
@@ -310,6 +314,32 @@ ResumeAnalysis depends on `User.resumeText`. When a user uploads a new resume, t
 
 ---
 
+## 6b. Company Logos
+
+Application cards show the company's logo. Two Brandfetch APIs are involved, both authenticated with the same public client ID (`NEXT_PUBLIC_BRANDFETCH_CLIENT_ID`).
+
+| API | Input | Used in | Runs when |
+|---|---|---|---|
+| Brand Search | Typed company name | `CompanySearchInput` on the create page | While typing, after 2+ characters and a 300 ms pause |
+| Logo API | Domain, e.g. `zomato.com` | `CompanyLogo` on the board, detail page, and dashboard | Whenever a card for an application with a stored domain renders |
+
+### Flow
+
+1. The user types a company name. The dropdown shows up to 5 matches with name, domain, and a small icon.
+2. Picking a match sets `companyName` and `companyDomain` in the form and shows the logo inside the input. Typing again clears the domain.
+3. `POST /api/applications` stores `companyDomain`, a nullable column on `Application`.
+4. `CompanyLogo` builds `https://cdn.brandfetch.io/{domain}/icon?c={clientId}`. It falls back to a letter avatar when there is no domain, no client ID, or the image fails to load.
+
+### Decisions
+
+- **Only the domain is stored, not the logo URL.** The URL is built at render time, so the provider can be changed later without touching the database.
+- **Brandfetch is called from the browser, not through the Express backend.** Brandfetch's guidelines say search requests should come from the user's browser and logo links should be embedded directly. The client ID is a public identifier, not a secret.
+- **A plain `<img>` is used instead of `next/image`,** so the logo link stays embedded directly as Brandfetch's guidelines require.
+- **Free-text company names still work.** Not picking a suggestion stores no domain and the card shows a letter avatar.
+- **Letters are the permanent fallback,** not an edge case. Some companies will never have a logo.
+
+---
+
 ## 7. Email and Cron Architecture
 
 ### Cron Job
@@ -379,6 +409,7 @@ The extracted text is stored in `User.resumeText`. It is not cleaned or normaliz
 | Cron scheduler | node-cron | Vercel Cron, external HTTP trigger | node-cron runs in-process with zero operational overhead. Acceptable for single-instance deployment. |
 | Email provider | Resend | SendGrid, Nodemailer + SMTP | Resend has a simpler API than SendGrid and doesn't require SMTP configuration like Nodemailer. |
 | File storage | Supabase Storage | AWS S3, Cloudinary | Already using Supabase. No second vendor needed. |
+| Company logos | Brandfetch Logo API + Brand Search API, with the domain stored in `Application.companyDomain` | Clearbit Logo API, Logo.dev, Google favicon service | The Clearbit Logo API has been shut down. Brandfetch's free tier needs no attribution and returned logos for the large Indian companies tested. Only the domain is stored, so the provider can be swapped without a migration. |
 | Monolith vs microservices | Monolith | Microservices | The application has one developer, one deployment target, and no scaling requirements that justify microservices. A monolith is faster to build, debug, and understand. |
 
 ---
@@ -438,3 +469,9 @@ NAUKARI, REFERAL, and COLDEMAIL are misspelled in the initial migration. Correct
 
 **pdf2json text traversal**
 The PDF text extraction uses a manual traversal of `pdfData.Pages[].Texts[].R[]` because `getRawTextContent()` returned empty strings. This is a workaround for an undocumented behavior of pdf2json and may break on different PDF structures.
+
+**Company logos: existing applications have no domain**
+Applications created before `companyDomain` was added have `NULL` and show letter avatars. There is no UI to edit a domain on an existing application, and the update endpoint ignores an empty `companyDomain`, so a stored domain cannot be cleared through the API.
+
+**Company logos: coverage and the client ID**
+Logo and search coverage was checked only on a small set of well-known companies. Smaller companies may be missing from Brandfetch and fall back to a letter avatar. The client ID ships to the browser and is visible in page source.

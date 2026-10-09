@@ -116,6 +116,7 @@ updatedAt
 id
 userId
 companyName
+companyDomain      <- optional, null if not set; a bare domain like "zomato.com"
 jobTitle          <- NOT "role" or "title"
 jobDescription
 status
@@ -383,6 +384,7 @@ Request body:
 ```json
 {
   "companyName": "Google",
+  "companyDomain": "google.com",
   "jobTitle": "Backend Engineer",
   "jobDescription": "Design and build scalable backend systems...",
   "source": "LINKED_IN",
@@ -393,9 +395,11 @@ Request body:
 
 Required: `companyName`, `jobTitle`, `source`
 
-Optional: `jobDescription`, `notes`, `dateApplied`
+Optional: `jobDescription`, `notes`, `dateApplied`, `companyDomain`
 
 If `jobDescription` is omitted, the backend stores an empty string. If `dateApplied` is omitted, it defaults to the current server time.
+
+`companyDomain` is the company's website domain (for example `zomato.com`). The frontend uses it to show the company logo. Send a bare domain, not a URL. An empty string is treated as not provided, and applications without one return `companyDomain: null`.
 
 Response 201:
 
@@ -405,6 +409,7 @@ Response 201:
     "id": "cmsyideb30007ncphs5gpgeph",
     "userId": "cmp07oqw40000r9w593fvr195",
     "companyName": "Google",
+    "companyDomain": "google.com",
     "jobTitle": "Backend Engineer",
     "jobDescription": "Design and build scalable backend systems...",
     "status": "APPLIED",
@@ -444,6 +449,7 @@ Response 200:
       "id": "cmsyideb30007ncphs5gpgeph",
       "userId": "cmp07oqw40000r9w593fvr195",
       "companyName": "Google",
+      "companyDomain": "google.com",
       "jobTitle": "Backend Engineer",
       "jobDescription": "Design and build scalable backend systems...",
       "status": "APPLIED",
@@ -483,6 +489,7 @@ Response 200:
     "id": "cmsyideb30007ncphs5gpgeph",
     "userId": "cmp07oqw40000r9w593fvr195",
     "companyName": "Google",
+    "companyDomain": "google.com",
     "jobTitle": "Backend Engineer",
     "jobDescription": "Design and build scalable backend systems...",
     "status": "SCREENING",
@@ -528,6 +535,7 @@ Request body, all fields optional:
 ```json
 {
   "companyName": "Google",
+  "companyDomain": "google.com",
   "jobTitle": "Senior Backend Engineer",
   "jobDescription": "Updated job description...",
   "source": "LINKED_IN",
@@ -539,6 +547,8 @@ Request body, all fields optional:
 
 When `status` changes, a new `StatusHistory` record is automatically created.
 
+`companyDomain` can be set or changed here. An empty string is ignored, so a stored domain cannot currently be cleared through this endpoint.
+
 Response 200:
 
 ```json
@@ -547,6 +557,7 @@ Response 200:
     "id": "cmsyideb30007ncphs5gpgeph",
     "userId": "cmp07oqw40000r9w593fvr195",
     "companyName": "Google",
+    "companyDomain": "google.com",
     "jobTitle": "Senior Backend Engineer",
     "jobDescription": "Updated job description...",
     "status": "SCREENING",
@@ -920,4 +931,6 @@ The following items are intentionally deferred until after the functional fronte
 - The `jobTitle` field is not called `role`.
 - The `dateApplied` field is not called `appliedAt`.
 - The `isSent` field on `Reminder` is not called `sent`.
+- The `companyDomain` field on `Application` is optional and can be `null`. Never send a logo URL; the frontend builds logo URLs from the domain.
+- Brandfetch calls (company search and logo images) are made from the browser using `NEXT_PUBLIC_BRANDFETCH_CLIENT_ID`. The backend never calls Brandfetch.
 - Removed AI interview endpoints should not be called: `/api/ai/interview-prep`, `/api/ai/save-answers`, and `/api/ai/answers/:appId`.

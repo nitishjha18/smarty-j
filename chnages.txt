@@ -1,6 +1,5 @@
 Current branch: feature/company-logo - committed and pushed brnach till these two below point's
 
-We didnt provided a place to store and show it's logo in the application from when a suggestion is clicked, a small icon should come if I select a company in the end of that placeholder
 
 
 UPDATE DOCUMENTATION AT THE END OF THE BRNACH MERGING

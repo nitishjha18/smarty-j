@@ -70,7 +70,11 @@ NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
 NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
+
+NEXT_PUBLIC_BRANDFETCH_CLIENT_ID=...
 ```
+
+`NEXT_PUBLIC_BRANDFETCH_CLIENT_ID` is the free client ID from the Brandfetch developer portal (developers.brandfetch.com). It powers company logos and company-name search. It is a public identifier, not a secret. Without it the app still works and shows letter avatars instead of logos. Restart the frontend dev server after adding it.
 
 ## Useful Files
 

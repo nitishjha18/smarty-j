@@ -9,6 +9,8 @@ The applications module covers the applications list, create application, and ap
 
 Current important backend change: the old Interview Prep feature has been removed from active source code. The AI surface is now resume-to-job analysis backed by a saved `ResumeAnalysis` record per application.
 
+Company logos: an application can store an optional `companyDomain` (for example `zomato.com`). The create page fills it when the user picks a company from an autocomplete, and `CompanyLogo` shows the logo on the board, the detail page, and the dashboard. See Section 5 for the autocomplete and `docs/architecture.md` Section 6b for the design.
+
 ---
 
 ## 2. Backend API Contract
@@ -38,11 +40,12 @@ ApplicationSource: LINKED_IN | NAUKARI | REFERAL | COLDEMAIL | SOCIAL_MEDIA | OT
 
 ### POST /api/applications
 
-Create an application. `companyName`, `jobTitle`, and `source` are required. `jobDescription`, `notes`, and `dateApplied` are optional. If `jobDescription` is omitted, the backend stores an empty string. If `dateApplied` is omitted, it defaults to the current server time.
+Create an application. `companyName`, `jobTitle`, and `source` are required. `jobDescription`, `notes`, `dateApplied`, and `companyDomain` are optional. If `jobDescription` is omitted, the backend stores an empty string. If `dateApplied` is omitted, it defaults to the current server time. `companyDomain` is the company's website domain, used to show its logo; an empty string is treated as not provided.
 
 ```json
 {
   "companyName": "Google",
+  "companyDomain": "google.com",
   "jobTitle": "Backend Engineer",
   "jobDescription": "Design and build scalable backend systems...",
   "source": "LINKED_IN",
@@ -59,6 +62,7 @@ Response `201`:
     "id": "cmsyideb30007ncphs5gpgeph",
     "userId": "cmp07oqw40000r9w593fvr195",
     "companyName": "Google",
+    "companyDomain": "google.com",
     "jobTitle": "Backend Engineer",
     "jobDescription": "Design and build scalable backend systems...",
     "status": "APPLIED",
@@ -91,6 +95,7 @@ Response `200`:
       "id": "cmsyideb30007ncphs5gpgeph",
       "userId": "cmp07oqw40000r9w593fvr195",
       "companyName": "Google",
+      "companyDomain": "google.com",
       "jobTitle": "Backend Engineer",
       "jobDescription": "Design and build scalable backend systems...",
       "status": "APPLIED",
@@ -124,6 +129,7 @@ Response `200`:
     "id": "cmsyideb30007ncphs5gpgeph",
     "userId": "cmp07oqw40000r9w593fvr195",
     "companyName": "Google",
+    "companyDomain": "google.com",
     "jobTitle": "Backend Engineer",
     "jobDescription": "Design and build scalable backend systems...",
     "status": "SCREENING",
@@ -156,6 +162,7 @@ All body fields are optional; send only fields that change.
 ```json
 {
   "companyName": "Google",
+  "companyDomain": "google.com",
   "jobTitle": "Senior Backend Engineer",
   "jobDescription": "Updated job description...",
   "source": "LINKED_IN",
@@ -168,6 +175,8 @@ All body fields are optional; send only fields that change.
 Response `200` is `{ "application": { ... } }`, using the full application shape from `GET /api/applications/:id`, including `statusHistory`.
 
 When `status` changes, the service automatically creates a new `StatusHistory` record.
+
+`companyDomain` can be set or changed here. An empty string is ignored, so a stored domain cannot currently be cleared through this endpoint.
 
 Errors:
 
@@ -414,6 +423,12 @@ Status color mapping:
 | OFFER | green |
 | REJECTED | rose/red |
 
+### Company logo
+
+Each card shows the company logo through `CompanyLogo` (28px) to the left of the company name and job title. An application with no stored `companyDomain` makes no logo request and shows a letter avatar. An application with a domain requests its logo image from Brandfetch's CDN whenever the card renders; the browser may serve repeat loads from its cache.
+
+Note: this section was written when the page was a simple list. The page now renders applications as a status-column board (Applied through Rejected) with count chips and a stale-applications banner. A full rewrite of this section is pending.
+
 ### States
 
 - Loading: loading text while the first fetch is in progress.
@@ -452,7 +467,8 @@ The page creates one application and then routes directly to its detail page.
 
 | Field | Input | Required | Initial value |
 |---|---|---|---|
-| `companyName` | text | Yes | `""` |
+| `companyName` | autocomplete text input (`CompanySearchInput`) | Yes | `""` |
+| `companyDomain` | set by picking a suggestion; no visible input | No | `""` |
 | `jobTitle` | text | Yes | `""` |
 | `source` | select | Yes | `LINKED_IN` |
 | `dateApplied` | date | No | current date |
@@ -460,6 +476,17 @@ The page creates one application and then routes directly to its detail page.
 | `notes` | textarea | No | `""` |
 
 The source select contains the six exact `ApplicationSource` values from the source-label table.
+
+### Company autocomplete
+
+`CompanySearchInput` replaces the plain company input.
+
+1. After the user types at least 2 characters, it waits 300 ms and calls the Brandfetch Brand Search API from the browser, then shows up to 5 matches (logo, name, domain, and a tick for verified brands).
+2. Picking a match sets `companyName` and `companyDomain` in the form, and the company's logo appears inside the input at the right end.
+3. Typing again clears `companyDomain` and the logo, so a half-edited name never keeps the wrong company's domain.
+4. Ignoring the dropdown still works: the name is saved as plain text with no domain, and the card shows a letter avatar.
+
+Search and logos need `NEXT_PUBLIC_BRANDFETCH_CLIENT_ID`. Without it the field behaves as a plain text input.
 
 ### Validation and submit behavior
 
@@ -470,7 +497,10 @@ On submit, call `POST /api/applications`. On success, the backend creates the in
 ```ts
 const token = await getToken()
 if (!token) return
-const data = await createApplication(token, form)
+const data = await createApplication(token, {
+  ...form,
+  companyDomain: form.companyDomain || undefined,
+})
 router.push(`/applications/${data.application.id}`)
 ```
 
@@ -500,7 +530,9 @@ The page is organized into three tabs:
 - `ai`: saved resume analysis and reanalysis controls.
 - `reminder`: reminder creation and reminder guidance.
 
-The header remains sticky and includes back navigation, company name, job title, current status badge, and overflow actions.
+The header remains sticky and includes back navigation, the company logo and name, job title, current status badge, and overflow actions.
+
+The company card on the overview tab uses `CompanyLogo` (44px) in place of the old first-letter box. Applications without a domain show a grey letter avatar.
 
 ### Initial API calls
 
@@ -752,3 +784,7 @@ It is configured in `backend/src/jobs/reminderJob.ts` and started by `startRemin
 - If the backend server is down at 9am, that day's reminders are missed because there is no retry mechanism.
 - `suggestions` is part of the `ResumeAnalysis` type but currently returns an empty array.
 - Saved resume analyses are invalidated after resume upload; the application detail page should be refreshed or revisited after updating a resume.
+- Applications created before `companyDomain` existed have no domain and show letter avatars. There is no UI to add or edit a domain on an existing application.
+- The update endpoint ignores an empty `companyDomain`, so a stored domain cannot be cleared through the API.
+- Logo and search coverage was checked only on a small set of well-known companies. Smaller companies may be missing from Brandfetch search and fall back to a letter avatar.
+- The autocomplete dropdown is mouse-only; there is no arrow-key or Enter selection yet.
