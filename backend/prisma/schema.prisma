@@ -54,6 +54,7 @@ enum ApplicationSource {
 model Application {
   id             String            @id @default(cuid())
   companyName    String
+  companyDomain  String?
   jobTitle       String
   jobDescription String
   status         ApplicationStatus @default(APPLIED)

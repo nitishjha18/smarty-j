@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { getApplications } from "../../lib/api"
 import { Application, ApplicationStatus, ApplicationSource } from "../../types"
+import CompanyLogo from "../../components/CompanyLogo"
 
 // ─── Shared utilities (docs/modules/applications.md §3) ───────────────────
 // Duplicated in the detail page today; extracting to lib/applicationUtils.ts
@@ -231,22 +232,27 @@ function ApplicationCard({ app, onClick }: { app: Application; onClick: () => vo
       onMouseEnter={(e) => (e.currentTarget.style.borderLeftColor = STATUS_COLORS[app.status])}
       onMouseLeave={(e) => (e.currentTarget.style.borderLeftColor = "transparent")}
     >
-      <div className="flex items-start justify-between gap-2 mb-1.5">
-        <span className="text-[13.5px] font-bold text-[#111827] leading-[1.3] truncate">
-          {app.companyName}
-        </span>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {isStale && (
-            <span className="inline-flex items-center text-[10px] font-bold text-[#92400E] bg-[#FFFBEB] border border-[#FDE68A] px-[5px] py-[1px] rounded-full">
-              {days}d
+      <div className="flex items-start gap-2.5 mb-2.5">
+        <CompanyLogo domain={app.companyDomain} name={app.companyName} size={28} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-[13.5px] font-bold text-[#111827] leading-[1.3] truncate">
+              {app.companyName}
             </span>
-          )}
-          <span className="mt-px transition-transform group-hover:translate-x-[2px] group-hover:text-[#6B7280]">
-            <ChevronIcon />
-          </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {isStale && (
+                <span className="inline-flex items-center text-[10px] font-bold text-[#92400E] bg-[#FFFBEB] border border-[#FDE68A] px-[5px] py-[1px] rounded-full">
+                  {days}d
+                </span>
+              )}
+              <span className="mt-px transition-transform group-hover:translate-x-[2px] group-hover:text-[#6B7280]">
+                <ChevronIcon />
+              </span>
+            </div>
+          </div>
+          <div className="text-xs text-[#6B7280] truncate">{app.jobTitle}</div>
         </div>
       </div>
-      <div className="text-xs text-[#6B7280] mb-2.5 truncate">{app.jobTitle}</div>
       <div className="flex items-center justify-between gap-1.5">
         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#9CA3AF]">
           <SourceIcon source={app.source} />
@@ -466,4 +472,4 @@ export default function ApplicationsPage() {
       )}
     </div>
   )
-}``
+}

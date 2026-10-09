@@ -17,6 +17,7 @@ import type {
   ApplicationStatus,
   ResumeAnalysis,
 } from "../../../types"
+import CompanyLogo from "../../../components/CompanyLogo"
 
 // ─── Label Maps ───────────────────────────────────────────────────────────────
 
@@ -572,7 +573,10 @@ Please help me improve my resume to address these gaps.`
           Applications
         </Link>
         <div className="w-px h-[18px] bg-[#E5E7EB] flex-shrink-0" />
-        <span className="text-[15px] font-semibold text-gray-900">{application.companyName}</span>
+        <div className="flex items-center gap-2.5">
+          <CompanyLogo domain={application.companyDomain} name={application.companyName} size={26} />
+          <span className="text-[15px] font-semibold text-gray-900">{application.companyName}</span>
+        </div>
         <span className="text-[13px] text-gray-500">{application.jobTitle}</span>
         <div
           className={`inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2.5 py-[3px] rounded-full text-white flex-shrink-0 ${STATUS_COLORS[application.status]}`}
@@ -684,9 +688,7 @@ Please help me improve my resume to address these gaps.`
 
                 <div className="px-[22px] pt-[22px] pb-5 border-b border-[#F0F1F4]">
                   <div className="flex items-center gap-3.5 mb-3">
-                    <div className="w-11 h-11 rounded-[10px] border border-[#E5E7EB] bg-[#F3F4F6] flex items-center justify-center text-lg font-bold text-[#FF6B35] flex-shrink-0">
-                      {application.companyName.charAt(0).toUpperCase()}
-                    </div>
+                    <CompanyLogo domain={application.companyDomain} name={application.companyName} size={44} />
                     <div>
                       <div className="text-xl font-bold text-gray-900 tracking-tight">{application.companyName}</div>
                       <div className="text-sm text-gray-500 mt-0.5">{application.jobTitle}</div>

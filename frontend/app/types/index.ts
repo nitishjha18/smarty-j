@@ -40,6 +40,7 @@ export interface Application {
   id: string
   userId: string
   companyName: string
+  companyDomain: string | null
   jobTitle: string
   jobDescription: string
   status: ApplicationStatus
