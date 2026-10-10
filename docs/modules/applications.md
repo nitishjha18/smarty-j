@@ -7,8 +7,6 @@ Last updated: October 2026
 
 The applications module covers the applications list, create application, and application detail pages. The detail page also contains AI Resume Fit analysis and reminder creation.
 
-Current important backend change: the old Interview Prep feature has been removed from active source code. The AI surface is now resume-to-job analysis backed by a saved `ResumeAnalysis` record per application.
-
 Company logos: an application can store an optional `companyDomain` (for example `zomato.com`). The create page fills it when the user picks a company from an autocomplete, and `CompanyLogo` shows the logo on the board, the detail page, and the dashboard. See Section 5 for the autocomplete and `docs/architecture.md` Section 6b for the design.
 
 ---
@@ -287,14 +285,6 @@ Errors:
 
 Important: uploading a new resume from the profile module deletes saved analyses for all of the user's applications. After a resume upload, this endpoint returns `null` until analysis is run again.
 
-### Removed AI endpoints
-
-These endpoints are no longer present in the current source code and must not be called:
-
-- `POST /api/ai/interview-prep`
-- `POST /api/ai/save-answers`
-- `GET /api/ai/answers/:appId`
-
 ### POST /api/reminders
 
 Create an unsent reminder for an application. `applicationId` and `reminderDate` are required; `notes` is optional.
@@ -410,7 +400,7 @@ frontend/app/(protected)/applications/page.tsx
 
 ### Purpose and content
 
-The list is the user's application index. It renders one row/card per application, ordered by the backend's descending `dateApplied` order. Each item shows the company name, job title, source label, formatted date, and color-coded status.
+The list is a six-column status board. It preserves the backend's descending `dateApplied` order within each status column and shows a count chip, stale-applications banner, per-status summary strip, and cards with company name, job title, source, formatted date, color-coded status, and a stale-age badge when applicable.
 
 Status color mapping:
 
@@ -427,25 +417,23 @@ Status color mapping:
 
 Each card shows the company logo through `CompanyLogo` (28px) to the left of the company name and job title. An application with no stored `companyDomain` makes no logo request and shows a letter avatar. An application with a domain requests its logo image from Brandfetch's CDN whenever the card renders; the browser may serve repeat loads from its cache.
 
-Note: this section was written when the page was a simple list. The page now renders applications as a status-column board (Applied through Rejected) with count chips and a stale-applications banner. A full rewrite of this section is pending.
-
 ### States
 
-- Loading: loading text while the first fetch is in progress.
-- Error: API error message in red.
+- Loading: six columns of `Skeleton` placeholders while the first query is pending.
+- Error: the query error message centered in red.
 - Empty: empty state that links to creating the first application.
 - Populated: clickable application items.
 
 ### Fetch pattern
 
 ```ts
-const token = await getToken()
-if (!token) return
-const data = await getApplications(token)
-setApplications(data.applications)
+const { data, error: queryError, isPending } = useApplications()
+const applications = data ?? []
+const loading = isPending
+const error = queryError?.message ?? null
 ```
 
-This is one `GET /api/applications` call on mount. The API includes `statusHistory`; the list page does not need to render the full history.
+`useApplications()` owns the `GET /api/applications` request and its user-scoped cache entry. The API includes `statusHistory`; the board uses it for each card's most-recent-status age. Cached data remains visible while a refetch is in flight, so skeletons are limited to the first load.
 
 ### Navigation
 
@@ -495,14 +483,14 @@ Before submitting, require `companyName`, `jobTitle`, and `source`. If any is em
 On submit, call `POST /api/applications`. On success, the backend creates the initial `APPLIED` history record and the page redirects to `/applications/${data.application.id}`.
 
 ```ts
-const token = await getToken()
-if (!token) return
-const data = await createApplication(token, {
+const data = await createApplication.mutateAsync({
   ...form,
   companyDomain: form.companyDomain || undefined,
 })
 router.push(`/applications/${data.application.id}`)
 ```
+
+`useCreateApplication()` invalidates the signed-in user's applications and dashboard-stats queries after success.
 
 ### States
 
@@ -534,37 +522,23 @@ The header remains sticky and includes back navigation, the company logo and nam
 
 The company card on the overview tab uses `CompanyLogo` (44px) in place of the old first-letter box. Applications without a domain show a grey letter avatar.
 
-### Initial API calls
+### Initial data
 
-On mount, load the application and saved resume analysis in parallel:
-
-```ts
-const [appData, analysisRes] = await Promise.all([
-  getApplication(token, id),
-  getResumeAnalysis(token, id).catch(() => ({ analysis: null })),
-])
-
-const app = appData.application
-setApplication(app)
-setNotes(app.notes ?? "")
-setSavedAnalysis(analysisRes.analysis ?? null)
-```
-
-The saved-analysis fetch intentionally falls back to `{ analysis: null }` so a missing or failed analysis lookup does not prevent the application itself from rendering.
+The page uses separate `useApplication(id)` and `useResumeAnalysis(id)` queries. The application query takes the matching item from the applications-list cache as `placeholderData`, then fetches its full detail. The saved-analysis query maps an absent response to `null`; a query error also renders as no saved analysis. Both wait for the shared user-sync query. The notes editor initializes only once for an application ID, so a refetch cannot replace text the user is typing.
 
 ### Delete flow
 
 1. The user opens the overflow action and chooses delete.
 2. A confirmation modal asks `Delete this application?`.
-3. `Yes, delete` calls `deleteApplication(token, id)`.
+3. `Yes, delete` calls `deleteApplication.mutateAsync(id)`.
 4. On success, route to `/applications`.
 5. Failure surfaces as the page error and closes the deleting state.
 
 ### Status update flow
 
 1. Ignore the event when there is no application, an update is running, or the selected status is already current.
-2. Call `updateApplication(token, id, { status: newStatus })`.
-3. Replace local application state with `data.application`.
+2. Call `updateApplication.mutateAsync({ status: newStatus })`.
+3. The mutation writes the response into this application's query cache, then invalidates applications and dashboard stats.
 4. Show the temporary `Updated` confirmation.
 5. The backend appends a `StatusHistory` record when the status changed.
 
@@ -573,8 +547,8 @@ This is intentionally non-optimistic: the page shows the status change only afte
 ### Notes save flow
 
 1. Disable Save Notes when the current content equals `application.notes ?? ""`.
-2. Call `updateApplication(token, id, { notes })`.
-3. Replace local application state with `data.application`.
+2. Call `updateApplication.mutateAsync({ notes })`.
+3. The same mutation updates the query cache and invalidates the list and dashboard stats.
 4. Show temporary `Saved` feedback.
 
 ### Job description display
@@ -589,36 +563,25 @@ const [activeTab, setActiveTab] =
 const [overflowOpen, setOverflowOpen] = useState(false)
 const [jdModalOpen, setJdModalOpen] = useState(false)
 
-const [application, setApplication] = useState<Application | null>(null)
-const [loading, setLoading] = useState(true)
-const [error, setError] = useState<string | null>(null)
-
 const [notes, setNotes] = useState("")
-const [savingNotes, setSavingNotes] = useState(false)
 const [notesSaved, setNotesSaved] = useState(false)
-
-const [updatingStatus, setUpdatingStatus] = useState(false)
+const [actionError, setActionError] = useState<string | null>(null)
 const [statusUpdated, setStatusUpdated] = useState(false)
 
 const [confirmDelete, setConfirmDelete] = useState(false)
-const [deleting, setDeleting] = useState(false)
 
-const [analyzing, setAnalyzing] = useState(false)
 const [analysisError, setAnalysisError] = useState<string | null>(null)
-const [savedAnalysis, setSavedAnalysis] = useState<ResumeAnalysis | null>(null)
-const [loadingAnalysis, setLoadingAnalysis] = useState(true)
 const [copied, setCopied] = useState(false)
 
 const [reminderDate, setReminderDate] = useState("")
 const [reminderNotes, setReminderNotes] = useState("")
-const [savingReminder, setSavingReminder] = useState(false)
 const [reminderSaved, setReminderSaved] = useState(false)
 const [reminderError, setReminderError] = useState<string | null>(null)
 ```
 
 ### Page states
 
-- Initial load: full-page `Loading...`.
+- Initial load: full-page `Skeleton` placeholders only while the application query has no cached or placeholder data.
 - Initial-load error: full-page error text in red.
 - Not found: `Application not found.`.
 - Per-operation errors: retain the rendered application and display the error inline where possible.
@@ -633,9 +596,9 @@ AI Resume Fit lives on the application detail page's `ai` tab. It compares the u
 
 The UI explicitly reminds the user that analysis is based on the currently uploaded resume and links to `/profile` to update the resume. Uploading a new resume deletes saved analyses, so this tab will show the no-analysis state until the user analyses again.
 
-### Initial saved-analysis loading
+### Saved-analysis loading
 
-The detail page calls `GET /api/ai/resume-analysis/:appId` on mount through `getResumeAnalysis(token, id)`. If analysis exists, it is rendered immediately. If the endpoint returns `null`, the tab renders the empty state.
+`useResumeAnalysis(id)` owns the saved-analysis request and its user-scoped cache entry. It returns `null` for an absent analysis; after a successful analysis mutation, that result is written to the same cache key and renders without a separate fetch.
 
 ### Trigger and pre-check
 
@@ -644,11 +607,10 @@ The detail page calls `GET /api/ai/resume-analysis/:appId` on mount through `get
 Before any request, check `application.jobDescription`. When it is empty, set `analysisError` to `Add a job description to this application first.` and do not call the API.
 
 ```ts
-const res = await analyzeResume(token, application.id)
-setSavedAnalysis(res.analysis)
+await analyzeResume.mutateAsync(application.id)
 ```
 
-The API saves the result, so the next detail-page mount can load it with `getResumeAnalysis`.
+The mutation writes its returned analysis to the detail page's cached analysis key.
 
 ### Display
 
@@ -743,7 +705,7 @@ The date input has `min` set to today's date. Before the API call, a missing dat
 The implementation sends the optional note as `reminderNotes.trim() || undefined`:
 
 ```ts
-await createReminder(token, {
+await createReminder.mutateAsync({
   applicationId: id,
   reminderDate,
   notes: reminderNotes.trim() || undefined,
@@ -783,7 +745,7 @@ It is configured in `backend/src/jobs/reminderJob.ts` and started by `startRemin
 - UTC/IST mismatch can cause same-day reminders set late at night to be missed.
 - If the backend server is down at 9am, that day's reminders are missed because there is no retry mechanism.
 - `suggestions` is part of the `ResumeAnalysis` type but currently returns an empty array.
-- Saved resume analyses are invalidated after resume upload; the application detail page should be refreshed or revisited after updating a resume.
+- Resume upload replaces every cached saved analysis with `null`; the detail page reflects that cache update without needing a refresh.
 - Applications created before `companyDomain` existed have no domain and show letter avatars. There is no UI to add or edit a domain on an existing application.
 - The update endpoint ignores an empty `companyDomain`, so a stored domain cannot be cleared through the API.
 - Logo and search coverage was checked only on a small set of well-known companies. Smaller companies may be missing from Brandfetch search and fall back to a letter avatar.

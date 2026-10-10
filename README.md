@@ -41,44 +41,36 @@ cd frontend && npm run build
 
 ### Backend — `backend/.env`
 
-```env
-PORT=5000
-CLIENT_URL=http://localhost:3000
-
-DATABASE_URL=...
-DIRECT_URL=...
-
-CLERK_PUBLISHABLE_KEY=...
-CLERK_SECRET_KEY=...
-
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-
-GEMINI_API_KEY=...
-
-RESEND_API_KEY=...
-RESEND_FROM_EMAIL=reminders@applyntrack.online
+```text
+PORT
+CLIENT_URL
+DATABASE_URL
+DIRECT_URL
+CLERK_PUBLISHABLE_KEY
+CLERK_SECRET_KEY
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+GEMINI_API_KEY
+RESEND_API_KEY
+RESEND_FROM_EMAIL
 ```
 
 ### Frontend — `frontend/.env.local`
 
-```env
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...
-CLERK_SECRET_KEY=...
-
-NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
-NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
-NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
-
-NEXT_PUBLIC_BRANDFETCH_CLIENT_ID=...
+```text
+NEXT_PUBLIC_API_URL
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+NEXT_PUBLIC_BRANDFETCH_CLIENT_ID
 ```
 
 `NEXT_PUBLIC_BRANDFETCH_CLIENT_ID` is the free client ID from the Brandfetch developer portal (developers.brandfetch.com). It powers company logos and company-name search. It is a public identifier, not a secret. Without it the app still works and shows letter avatars instead of logos. Restart the frontend dev server after adding it.
 
 ## Useful Files
 
-- `docs/context.md` — session handoff and current state
 - `docs/architecture.md` — technical decisions
 - `docs/backend-api.md` — API contract
-- `docs/modules/` — per-feature specs
+- `docs/modules/applications.md` — applications module
+- `docs/modules/dashboard.md` — dashboard module
+- `docs/modules/profile.md` — profile module
+
+See [Client-side data fetching and caching](docs/architecture.md#client-side-data-fetching-and-caching) for the frontend query and cache design.

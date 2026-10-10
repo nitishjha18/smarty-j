@@ -1,11 +1,10 @@
 "use client"
 
-import { useAuth } from "@clerk/nextjs"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { createApplication } from "../../../lib/api"
 import { ApplicationSource } from "../../../types"
 import CompanySearchInput from "../../../components/CompanySearchInput"
+import { useCreateApplication } from "../../../lib/queries"
 
 const SOURCES: { value: ApplicationSource; label: string }[] = [
   { value: "LINKED_IN", label: "LinkedIn" },
@@ -17,8 +16,8 @@ const SOURCES: { value: ApplicationSource; label: string }[] = [
 ]
 
 export default function NewApplicationPage() {
-  const { getToken } = useAuth()
   const router = useRouter()
+  const createApplication = useCreateApplication()
 
   const [form, setForm] = useState({
     companyName: "",
@@ -29,7 +28,6 @@ export default function NewApplicationPage() {
     notes: "",
     dateApplied: new Date().toISOString().split("T")[0],
   })
-  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const handleChange = (
@@ -44,19 +42,14 @@ export default function NewApplicationPage() {
       return
     }
     try {
-      setSubmitting(true)
       setError(null)
-      const token = await getToken()
-      if (!token) return
-      const data = await createApplication(token, {
+      const data = await createApplication.mutateAsync({
         ...form,
         companyDomain: form.companyDomain || undefined,
       })
       router.push(`/applications/${data.application.id}`)
     } catch (err: any) {
       setError(err.message)
-    } finally {
-      setSubmitting(false)
     }
   }
 
@@ -193,10 +186,10 @@ export default function NewApplicationPage() {
         <div className="flex items-center gap-4 mt-8 pt-6 border-t border-[#E5E7EB]">
           <button
             onClick={handleSubmit}
-            disabled={submitting}
+            disabled={createApplication.isPending}
             className="bg-[#FF6B35] hover:bg-[#E85A2A] text-white text-sm font-semibold rounded-lg px-[22px] py-[11px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? "Saving..." : "Save Application"}
+            {createApplication.isPending ? "Saving..." : "Save Application"}
           </button>
           <button
             onClick={() => router.back()}

@@ -1,11 +1,10 @@
 "use client"
 
-import { useAuth } from "@clerk/nextjs"
-import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getApplications } from "../../lib/api"
 import { Application, ApplicationStatus, ApplicationSource } from "../../types"
 import CompanyLogo from "../../components/CompanyLogo"
+import Skeleton from "../../components/Skeleton"
+import { useApplications } from "../../lib/queries"
 
 // ─── Shared utilities (docs/modules/applications.md §3) ───────────────────
 // Duplicated in the detail page today; extracting to lib/applicationUtils.ts
@@ -327,27 +326,11 @@ function BoardColumn({
 // ─── Page ───────────────────────────────────────────────────────────────
 
 export default function ApplicationsPage() {
-  const { getToken } = useAuth()
   const router = useRouter()
-  const [applications, setApplications] = useState<Application[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const token = await getToken()
-        if (!token) return
-        const data = await getApplications(token)
-        setApplications(data.applications)
-      } catch (err: any) {
-        setError(err.message)
-      } finally {
-        setLoading(false)
-      }
-    }
-    fetch()
-  }, [])
+  const { data, error: queryError, isPending } = useApplications()
+  const applications = data ?? []
+  const loading = isPending
+  const error = queryError?.message ?? null
 
   const columns = STATUS_ORDER.map((status) => ({
     status,
@@ -408,8 +391,14 @@ export default function ApplicationsPage() {
 
       {/* Loading */}
       {loading && (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-sm text-[#9CA3AF]">Loading your applications...</div>
+        <div className="flex-1 grid grid-cols-6 gap-3 px-7 pt-5 pb-7">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="flex flex-col gap-2">
+              <Skeleton className="h-5 w-20" />
+              <Skeleton className="h-28 w-full" />
+              <Skeleton className="h-28 w-full" />
+            </div>
+          ))}
         </div>
       )}
 

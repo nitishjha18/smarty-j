@@ -46,6 +46,7 @@ Express REST API (Node.js)
 | Language | TypeScript | Type safety across the frontend-backend boundary. Field name mismatches become compile errors. |
 | Styling | Tailwind CSS 4 | Utility-first, no context switching between CSS files and components. |
 | Auth | Clerk (`@clerk/nextjs`) | Handles Google OAuth, token issuance, session management, and route protection with minimal configuration. |
+| Client data | TanStack Query v5 | The provider creates one QueryClient for the browser session. It was chosen over SWR for its query-key factory, mutation cache APIs, and Devtools. |
 | Company logos | Brandfetch (Logo API + Brand Search API) | Free tier with no attribution requirement. Returned logos for the large Indian companies tested. Called directly from the browser. See Section 6b. |
 
 ### Backend
@@ -67,22 +68,24 @@ Express REST API (Node.js)
 
 ## 2b. Frontend Architecture
 
-Layout: protected routes wrapped in `app/(protected)/layout.tsx` which calls `syncUser` on mount and guards with `isLoaded`/`isSignedIn` from Clerk.
+Layout: protected routes are wrapped in `app/(protected)/layout.tsx`. It runs `useUserSync()` and keeps the sidebar and route content rendered while the user-sync query is in flight.
 
-State management: plain React useState/useEffect per page. No global state, no caching layer. Each page fetches its own data on mount. The dashboard uses Promise.all for parallel fetches.
+State management: `app/providers.tsx` creates one `QueryClient` with React state and renders it inside `ClerkProvider`. `app/lib/queryKeys.ts` creates user-scoped keys; `app/lib/queries.ts` contains the query and mutation hooks. Page components keep only UI state such as active tabs, modal visibility, form inputs, and temporary success feedback.
 
-API calls: all calls go through `frontend/lib/api.ts`. No page makes raw fetch calls directly. Resume upload bypasses apiFetch and uses raw fetch with FormData — do not set Content-Type manually.
+API calls: all calls go through `frontend/app/lib/api.ts`, from query and mutation functions in `frontend/app/lib/queries.ts`. No page makes raw fetch calls directly. Resume upload bypasses `apiFetch` and uses raw fetch with FormData; do not set Content-Type manually.
 
-Auth: `useAuth()` provides `getToken()`. Always call fresh before each request — Clerk caches internally. `useUser()` provides user display name for the greeting.
+Auth: `useAuth()` provides `getToken()`. Every query and mutation gets a fresh token immediately before its API call. `useUserSync()` is enabled only for a loaded, signed-in Clerk user; all other queries are enabled only after that shared sync query succeeds. `useUser()` provides user display name for the greeting.
 
 Component structure:
 - `components/Sidebar.tsx` — shared across all protected pages via the protected layout
+- `components/Skeleton.tsx` — neutral first-load placeholder primitive
 - `components/CompanyLogo.tsx` — company logo with letter-avatar fallback, used on the board, detail page, dashboard, and the create form
 - `components/CompanySearchInput.tsx` — company name autocomplete on the create page, backed by the Brandfetch Brand Search API
+- `providers.tsx` — QueryClient provider and development-only React Query Devtools
 - All pages are client components (`"use client"`)
 - No server components in use currently
 
-Design system: #FF6B35 electric orange as brand color. Inter font. Light mode only. Full token set in `docs/context.md` Section 6.
+Design system: Inter is applied at the root. The shell and dashboard use orange `#FC8019`, with white surfaces, `#F4F5F7` page background, `#111827` primary text, and `#6B7280` secondary text. Borders use `#E5E7EB` or `#F0F1F4`; active navigation uses `#FFF4EC`. Statuses use blue, amber, purple, orange, green, and rose/red accents. Individual form and detail controls also use local orange values. The application is light-mode oriented, although `globals.css` defines a dark system-color override.
 
 ---
 
@@ -121,7 +124,7 @@ Application
 StatusHistory
   id              String            @id @default(cuid())
   applicationId   String
-  status          ApplicationStatus
+  status          ApplicationStatus @default(APPLIED)
   createdAt       DateTime          @default(now())
 
 ResumeAnalysis
@@ -260,11 +263,23 @@ The userId is derived exclusively from the Clerk JWT on the backend. The `requir
 
 ---
 
+### Client-side data fetching and caching
+
+`qk` builds keys that include the Clerk user ID: `user-sync`, `profile`, `applications`, individual `application`, `dashboard-stats`, and `resume-analysis` keys. User-scoped keys prevent one signed-in user's cached server data from being addressed as another user's data.
+
+`Providers` creates one QueryClient for the browser session. Queries are fresh for 60 seconds, garbage-collected after five minutes, refetch on window focus, and retry once; mutations do not retry. The user-sync query is fresh indefinitely. Other server-data hooks wait until that sync query succeeds, so protected requests are not issued before the local user exists.
+
+Mutation cache handling is explicit: creating an application invalidates applications and dashboard stats; updating one writes its detail result, then invalidates applications and stats; deleting one removes its detail and analysis entries, filters it from the applications cache, and invalidates stats. Resume analysis writes its returned analysis to the matching key. Profile updates write their returned user to the profile key. Resume upload writes the returned resume fields into the profile key and replaces every cached resume analysis for that user with `null`. The sidebar clears the whole QueryClient before Clerk sign-out.
+
+Application detail uses the matching item from the applications cache as placeholder data while its detail query resolves. Forms initialize editable fields once from fetched data, so a refetch does not overwrite typing. Status changes wait for the mutation response rather than applying an optimistic update. Skeletons represent an initial load only, while cached or placeholder data remains visible during a refetch.
+
+---
+
 ## 6. AI Integration
 
 ### Resume Analysis
 
-The AI module is centered on resume-to-job fit analysis. The old interview-prep flow was removed from the active source code and the database model was replaced with one saved ResumeAnalysis row per application.
+The AI module is centered on resume-to-job fit analysis, with one saved ResumeAnalysis row per application.
 
 The service fetches two pieces of data from the database before producing an analysis:
 - `User.resumeText` — the full extracted text of the user's resume
@@ -305,8 +320,6 @@ The response is cleaned of markdown fences and parsed as JSON. The parsed Gemini
 ### Why ResumeAnalysis Is Saved
 
 The analysis result is saved because it is shown on the application detail page and should survive refreshes without another Gemini call. The `applicationId` field is unique, so each application has at most one saved analysis. Running analysis again overwrites the previous row with fresher output.
-
-This is a deliberate change from the earlier architecture where resume analysis was recomputed on demand and interview questions were saved. The current product no longer stores interview questions or answers. Instead, the saved artifact is the resume fit analysis itself.
 
 ### Invalidating Analysis After Resume Upload
 
@@ -410,6 +423,7 @@ The extracted text is stored in `User.resumeText`. It is not cleaned or normaliz
 | Email provider | Resend | SendGrid, Nodemailer + SMTP | Resend has a simpler API than SendGrid and doesn't require SMTP configuration like Nodemailer. |
 | File storage | Supabase Storage | AWS S3, Cloudinary | Already using Supabase. No second vendor needed. |
 | Company logos | Brandfetch Logo API + Brand Search API, with the domain stored in `Application.companyDomain` | Clearbit Logo API, Logo.dev, Google favicon service | The Clearbit Logo API has been shut down. Brandfetch's free tier needs no attribution and returned logos for the large Indian companies tested. Only the domain is stored, so the provider can be swapped without a migration. |
+| Client data fetching | TanStack Query v5 with user-scoped query keys | SWR, React context, module-level cache | The provider keeps one browser-session QueryClient; key factories, mutation cache updates and invalidation, and Devtools fit the application's query and mutation flows. |
 | Monolith vs microservices | Monolith | Microservices | The application has one developer, one deployment target, and no scaling requirements that justify microservices. A monolith is faster to build, debug, and understand. |
 
 ---
@@ -444,9 +458,9 @@ ApplynTrack stores and analyzes resumes but does not generate or edit them. A re
 
 The application is a monolith by design. At the current scale, the operational overhead of microservices would cost more than the benefits gained.
 
-### UI Polish Phase (Current)
+### UI Polish
 
-The frontend is functional end-to-end. The current phase applies a consistent design system across all pages. Brand color is #FF6B35. Pages are redesigned one at a time, orchestrated from a dedicated design session. Each page is documented in `docs/modules/` after redesign is built and tested.
+The frontend uses a consistent light-oriented shell, dashboard, application, and profile design with the `#FC8019` orange accent. The implementation is documented in `docs/modules/`.
 
 ---
 
@@ -471,7 +485,7 @@ NAUKARI, REFERAL, and COLDEMAIL are misspelled in the initial migration. Correct
 The PDF text extraction uses a manual traversal of `pdfData.Pages[].Texts[].R[]` because `getRawTextContent()` returned empty strings. This is a workaround for an undocumented behavior of pdf2json and may break on different PDF structures.
 
 **Company logos: existing applications have no domain**
-Applications created before `companyDomain` was added have `NULL` and show letter avatars. There is no UI to edit a domain on an existing application, and the update endpoint ignores an empty `companyDomain`, so a stored domain cannot be cleared through the API.
+Applications created before `companyDomain` was added have `NULL` and show letter avatars. There is no UI to edit a domain on an existing application. The backend controller converts a falsy submitted `companyDomain` to `undefined`, so a stored domain cannot be cleared through that endpoint.
 
 **Company logos: coverage and the client ID**
 Logo and search coverage was checked only on a small set of well-known companies. Smaller companies may be missing from Brandfetch and fall back to a letter avatar. The client ID ships to the browser and is visible in page source.

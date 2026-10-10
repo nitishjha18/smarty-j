@@ -1,10 +1,10 @@
 "use client"
 
-import { useAuth, useUser } from "@clerk/nextjs"
-import { useEffect, useState } from "react"
-import { getDashboardStats, getApplications } from "../../lib/api"
-import { DashboardStats, Application, ApplicationStatus } from "../../types"
+import { useUser } from "@clerk/nextjs"
+import { useState } from "react"
+import { ApplicationStatus } from "../../types"
 import CompanyLogo from "../../components/CompanyLogo"
+import { useApplications, useDashboardStats } from "../../lib/queries"
 
 const PIPELINE_STAGES: ApplicationStatus[] = [
   "APPLIED",
@@ -61,13 +61,13 @@ const CARD_SHADOW = "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)"
 const TOOLTIP_SHADOW = "0 4px 12px rgba(0,0,0,0.08)"
 
 export default function DashboardPage() {
-  const { getToken } = useAuth()
   const { user } = useUser()
-
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [applications, setApplications] = useState<Application[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const statsQuery = useDashboardStats()
+  const applicationsQuery = useApplications()
+  const stats = statsQuery.data ?? null
+  const applications = applicationsQuery.data ?? []
+  const loading = statsQuery.isPending || applicationsQuery.isPending
+  const error = statsQuery.error?.message ?? applicationsQuery.error?.message ?? null
   const [calendarMonth, setCalendarMonth] = useState(() => new Date())
 
   const firstName = user?.firstName || user?.fullName?.split(" ")[0] || "there"
@@ -76,26 +76,6 @@ export default function DashboardPage() {
   const weekday = nowDate.toLocaleDateString("en-US", { weekday: "long" })
   const month = nowDate.toLocaleDateString("en-US", { month: "long" })
   const headerDate = `${weekday}, ${nowDate.getDate()} ${month} ${nowDate.getFullYear()}`.toUpperCase()
-
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const token = await getToken()
-        if (!token) return
-        const [statsData, appsData] = await Promise.all([
-          getDashboardStats(token),
-          getApplications(token),
-        ])
-        setStats(statsData.stats)
-        setApplications(appsData.applications)
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Something went wrong")
-      } finally {
-        setLoading(false)
-      }
-    }
-    init()
-  }, [])
 
   // Pipeline counts — derived client-side
   const pipelineCounts = PIPELINE_STAGES.reduce((acc, stage) => {

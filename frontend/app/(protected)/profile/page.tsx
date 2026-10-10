@@ -1,62 +1,46 @@
 "use client"
 
-import { useAuth } from "@clerk/nextjs"
 import { useEffect, useRef, useState } from "react"
-import { getProfile, updateProfile, uploadResume } from "../../lib/api"
-import { User } from "../../types"
+import Skeleton from "../../components/Skeleton"
+import { useProfile, useUpdateProfile, useUploadResume } from "../../lib/queries"
 
 export default function ProfilePage() {
-  const { getToken } = useAuth()
-
-  const [profile, setProfile] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const profileQuery = useProfile()
+  const updateProfile = useUpdateProfile()
+  const uploadResume = useUploadResume()
+  const profile = profileQuery.data ?? null
+  const loading = profileQuery.isPending
+  const error = profileQuery.error?.message ?? null
 
   const [name, setName] = useState("")
   const [targetRole, setTargetRole] = useState("")
   const [experienceLevel, setExperienceLevel] = useState("")
-  const [savingProfile, setSavingProfile] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
   const [profileError, setProfileError] = useState<string | null>(null)
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [uploadingResume, setUploadingResume] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const initializedProfileId = useRef<string | null>(null)
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const token = await getToken()
-        const data = await getProfile(token!)
-        setProfile(data.user)
-        setName(data.user.name ?? "")
-        setTargetRole(data.user.targetRole ?? "")
-        setExperienceLevel(data.user.experienceLevel ?? "")
-      } catch (err: any) {
-        setError(err.message)
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-  }, [getToken])
+    if (!profile || initializedProfileId.current === profile.id) return
+    initializedProfileId.current = profile.id
+    setName(profile.name ?? "")
+    setTargetRole(profile.targetRole ?? "")
+    setExperienceLevel(profile.experienceLevel ?? "")
+  }, [profile])
 
   const handleSaveProfile = async () => {
     setProfileError(null)
     setProfileSaved(false)
-    setSavingProfile(true)
     try {
-      const token = await getToken()
-      const data = await updateProfile(token!, { name, targetRole, experienceLevel })
-      setProfile(data.user)
+      await updateProfile.mutateAsync({ name, targetRole, experienceLevel })
       setProfileSaved(true)
     } catch (err: any) {
       setProfileError(err.message)
-    } finally {
-      setSavingProfile(false)
     }
   }
 
@@ -73,26 +57,23 @@ export default function ProfilePage() {
       return
     }
 
-    setUploadingResume(true)
     try {
-      const token = await getToken()
-      const data = await uploadResume(token!, selectedFile)
-      setProfile((prev) =>
-        prev ? { ...prev, resumeUrl: data.resumeUrl, resumeText: data.resumeText } : prev
-      )
+      await uploadResume.mutateAsync(selectedFile)
       setSelectedFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ""
       setUploadSuccess(true)
     } catch (err: any) {
       setUploadError(err.message)
-    } finally {
-      setUploadingResume(false)
     }
   }
 
   if (loading) {
     return (
-      <div className="p-8 text-[#6B7280] text-sm">Loading profile...</div>
+      <div className="p-10 max-w-[900px] flex flex-col gap-6">
+        <Skeleton className="h-8 w-32" />
+        <Skeleton className="h-72 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
     )
   }
 
@@ -162,10 +143,10 @@ export default function ProfilePage() {
         <div className="mt-7">
           <button
             onClick={handleSaveProfile}
-            disabled={savingProfile}
+            disabled={updateProfile.isPending}
             className="bg-[#FF6B35] hover:bg-[#E85A2A] text-white text-sm font-semibold rounded-lg px-[22px] py-[11px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {savingProfile ? "Saving..." : "Save Profile"}
+            {updateProfile.isPending ? "Saving..." : "Save Profile"}
           </button>
           {profileSaved && (
             <p className="mt-3 text-sm text-[#16A34A]">Profile saved.</p>
@@ -247,10 +228,10 @@ export default function ProfilePage() {
         <div className="mt-7">
           <button
             onClick={handleUploadResume}
-            disabled={uploadingResume}
+            disabled={uploadResume.isPending}
             className="bg-[#FF6B35] hover:bg-[#E85A2A] text-white text-sm font-semibold rounded-lg px-[22px] py-[11px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {uploadingResume ? "Uploading..." : "Upload"}
+            {uploadResume.isPending ? "Uploading..." : "Upload"}
           </button>
 
           {uploadSuccess && (
