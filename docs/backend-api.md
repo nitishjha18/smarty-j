@@ -86,7 +86,7 @@ SOCIAL_MEDIA
 OTHER_JOB_APPS
 ```
 
-Note: `NAUKARI` and `REFERAL` are intentional legacy spellings in the schema. Do not correct them in frontend payloads.
+Note: `NAUKARI`, `REFERAL`, and `COLDEMAIL` are intentional legacy spellings in the schema. Do not correct them in frontend payloads.
 
 ---
 
@@ -610,7 +610,7 @@ Deleting an application also cascades related `ResumeAnalysis` and `Reminder` ro
 
 ## AI Module
 
-The AI module now supports resume-to-job analysis. The previous interview-prep, save-answers, and get-answers endpoints were removed when `AiInterview` and `AiInterviewQuestion` were replaced by `ResumeAnalysis`.
+The AI module supports resume-to-job analysis.
 
 ---
 
@@ -915,7 +915,6 @@ The following items are intentionally deferred until after the functional fronte
 - `.gitignore` cleanup. `dist`, generated Prisma files, and environment files may not be fully ignored.
 - Automated tests. No backend test suite exists yet.
 - Reminder delivery hardening. The reminder job exists, but API documentation only covers CRUD endpoints.
-- UI polish pass. This comes after the functional frontend is working.
 
 ---
 
@@ -923,14 +922,14 @@ The following items are intentionally deferred until after the functional fronte
 
 - Never hardcode `http://localhost:5000`; always use `process.env.NEXT_PUBLIC_API_URL`.
 - Never send `userId` from the frontend. The backend reads the user from the Clerk token and local database.
-- Call `POST /api/user/sync` after sign in before calling routes protected by `requireUser`.
+- The protected frontend layout runs the shared `POST /api/user/sync` query after sign-in; other frontend queries wait for it to succeed.
 - The `requireUser` middleware attaches the local DB user to the request for protected routes.
 - All timestamps are UTC; convert to local timezone for display.
 - Resume upload uses `FormData`, not JSON. Do not set the `Content-Type` header manually for multipart upload.
-- Uploading a new resume deletes saved resume analyses. Refresh any resume-analysis UI after upload.
+- Uploading a new resume deletes saved resume analyses. The frontend clears its cached analyses automatically, so active analysis UI reflects the no-analysis state without a manual refresh.
+- Frontend responses are cached client-side with TanStack Query under user-scoped query keys.
 - The `jobTitle` field is not called `role`.
 - The `dateApplied` field is not called `appliedAt`.
 - The `isSent` field on `Reminder` is not called `sent`.
 - The `companyDomain` field on `Application` is optional and can be `null`. Never send a logo URL; the frontend builds logo URLs from the domain.
 - Brandfetch calls (company search and logo images) are made from the browser using `NEXT_PUBLIC_BRANDFETCH_CLIENT_ID`. The backend never calls Brandfetch.
-- Removed AI interview endpoints should not be called: `/api/ai/interview-prep`, `/api/ai/save-answers`, and `/api/ai/answers/:appId`.

@@ -3,21 +3,20 @@
 import { useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
-import { useAuth } from "@clerk/nextjs"
-import {
-  getApplication,
-  updateApplication,
-  deleteApplication,
-  analyzeResume,
-  createReminder,
-  getResumeAnalysis,
-} from "../../../lib/api"
 import type {
   Application,
   ApplicationStatus,
-  ResumeAnalysis,
 } from "../../../types"
 import CompanyLogo from "../../../components/CompanyLogo"
+import Skeleton from "../../../components/Skeleton"
+import {
+  useAnalyzeResume,
+  useApplication,
+  useCreateReminder,
+  useDeleteApplication,
+  useResumeAnalysis,
+  useUpdateApplication,
+} from "../../../lib/queries"
 
 // ─── Label Maps ───────────────────────────────────────────────────────────────
 
@@ -256,7 +255,16 @@ function JobDescriptionModal({
 export default function ApplicationDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const { getToken } = useAuth()
+  const applicationQuery = useApplication(id)
+  const analysisQuery = useResumeAnalysis(id)
+  const updateApplication = useUpdateApplication(id)
+  const deleteApplication = useDeleteApplication()
+  const analyzeResume = useAnalyzeResume()
+  const createReminder = useCreateReminder()
+  const application = applicationQuery.data ?? null
+  const loading = applicationQuery.isPending
+  const savedAnalysis = analysisQuery.isError ? null : analysisQuery.data ?? null
+  const loadingAnalysis = analysisQuery.isPending
 
   // ── Tab / UI-only state ──
   const [activeTab, setActiveTab] = useState<"overview" | "ai" | "reminder">("overview")
@@ -265,38 +273,31 @@ export default function ApplicationDetailPage() {
   const overflowRef = useRef<HTMLDivElement>(null)
 
   // ── Core application state ──
-  const [application, setApplication] = useState<Application | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
   // ── Notes state ──
   const [notes, setNotes] = useState("")
-  const [savingNotes, setSavingNotes] = useState(false)
   const [notesSaved, setNotesSaved] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const error = applicationQuery.error?.message ?? actionError
 
   // ── Status state ──
-  const [updatingStatus, setUpdatingStatus] = useState(false)
   const [statusUpdated, setStatusUpdated] = useState(false)
 
   // ── Delete state ──
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
 
   // ── Resume analysis state ──
-  const [analyzing, setAnalyzing] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
 
   // ─── AI Resume Fit state ──────────────────────────────────────────────────────
-  const [savedAnalysis, setSavedAnalysis] = useState<ResumeAnalysis | null>(null)
-  const [loadingAnalysis, setLoadingAnalysis] = useState(true)
   const [copied, setCopied] = useState(false)
 
   // ── Reminder state ──
   const [reminderDate, setReminderDate] = useState("")
   const [reminderNotes, setReminderNotes] = useState("")
-  const [savingReminder, setSavingReminder] = useState(false)
   const [reminderSaved, setReminderSaved] = useState(false)
   const [reminderError, setReminderError] = useState<string | null>(null)
+  const initializedNotesApplicationId = useRef<string | null>(null)
 
   // ─── Close overflow menu on outside click ──────────────────────────────────
 
@@ -310,91 +311,50 @@ export default function ApplicationDetailPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  // ─── Mount: load application + saved resume analysis ─────────────────────
-
   useEffect(() => {
-    if (!id) return
-
-    const load = async () => {
-      try {
-        const token = await getToken()
-        if (!token) return
-
-        // Parallel fetch — application data and any saved resume analysis
-        const [appData, analysisRes] = await Promise.all([
-          getApplication(token, id),
-          getResumeAnalysis(token, id).catch(() => ({ analysis: null })),
-        ])
-
-        const app: Application = appData.application
-        setApplication(app)
-        setNotes(app.notes ?? "")
-        setSavedAnalysis(analysisRes.analysis ?? null)
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to load application")
-      } finally {
-        setLoading(false)
-        setLoadingAnalysis(false)
-      }
-    }
-
-    load()
-  }, [id, getToken])
+    if (!application || initializedNotesApplicationId.current === application.id) return
+    initializedNotesApplicationId.current = application.id
+    setNotes(application.notes ?? "")
+  }, [application])
 
 
   // ─── Status update ────────────────────────────────────────────────────────
 
   const handleStatusChange = async (newStatus: ApplicationStatus) => {
-    if (!application || updatingStatus || newStatus === application.status) return
+    if (!application || updateApplication.isPending || newStatus === application.status) return
 
-    setUpdatingStatus(true)
     setStatusUpdated(false)
     try {
-      const token = await getToken()
-      if (!token) return
-      const data = await updateApplication(token, id, { status: newStatus })
-      setApplication(data.application)
+      await updateApplication.mutateAsync({ status: newStatus })
       setStatusUpdated(true)
       setTimeout(() => setStatusUpdated(false), 2000)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to update status")
-    } finally {
-      setUpdatingStatus(false)
+      setActionError(err instanceof Error ? err.message : "Failed to update status")
     }
   }
 
   // ─── Notes save ───────────────────────────────────────────────────────────
 
   const handleSaveNotes = async () => {
-    if (!application || savingNotes) return
+    if (!application || updateApplication.isPending) return
 
-    setSavingNotes(true)
     try {
-      const token = await getToken()
-      if (!token) return
-      const data = await updateApplication(token, id, { notes })
-      setApplication(data.application)
+      await updateApplication.mutateAsync({ notes })
       setNotesSaved(true)
       setTimeout(() => setNotesSaved(false), 2000)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to save notes")
-    } finally {
-      setSavingNotes(false)
+      setActionError(err instanceof Error ? err.message : "Failed to save notes")
     }
   }
 
   // ─── Delete ───────────────────────────────────────────────────────────────
 
   const handleDelete = async () => {
-    setDeleting(true)
     try {
-      const token = await getToken()
-      if (!token) return
-      await deleteApplication(token, id)
+      await deleteApplication.mutateAsync(id)
       router.push("/applications")
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to delete application")
-      setDeleting(false)
+      setActionError(err instanceof Error ? err.message : "Failed to delete application")
       setConfirmDelete(false)
     }
   }
@@ -410,13 +370,9 @@ export default function ApplicationDetailPage() {
       return
     }
 
-    setAnalyzing(true)
     setAnalysisError(null)
     try {
-      const token = await getToken()
-      if (!token) return
-      const res = await analyzeResume(token, application.id)
-      setSavedAnalysis(res.analysis)
+      await analyzeResume.mutateAsync(application.id)
     } catch (err) {
       const message = err instanceof Error ? err.message : "Analysis failed"
       // Surface the backend's specific "no resume" error clearly
@@ -425,8 +381,6 @@ export default function ApplicationDetailPage() {
       } else {
         setAnalysisError(message)
       }
-    } finally {
-      setAnalyzing(false)
     }
   }
 
@@ -456,14 +410,11 @@ Please help me improve my resume to address these gaps.`
       return
     }
 
-    setSavingReminder(true)
     setReminderError(null)
     setReminderSaved(false)
 
     try {
-      const token = await getToken()
-      if (!token) return
-      await createReminder(token, {
+      await createReminder.mutateAsync({
         applicationId: id,
         reminderDate,
         notes: reminderNotes.trim() || undefined,
@@ -473,8 +424,6 @@ Please help me improve my resume to address these gaps.`
       setReminderNotes("")
     } catch (err: unknown) {
       setReminderError(err instanceof Error ? err.message : "Failed to set reminder")
-    } finally {
-      setSavingReminder(false)
     }
   }
 
@@ -482,7 +431,11 @@ Please help me improve my resume to address these gaps.`
 
   if (loading) {
     return (
-      <div className="p-8 text-gray-500">Loading...</div>
+      <div className="p-8 flex flex-col gap-5">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-72 w-full" />
+      </div>
     )
   }
 
@@ -514,7 +467,7 @@ Please help me improve my resume to address these gaps.`
       {confirmDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
-          onClick={() => !deleting && setConfirmDelete(false)}
+          onClick={() => !deleteApplication.isPending && setConfirmDelete(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -536,17 +489,17 @@ Please help me improve my resume to address these gaps.`
             <div className="flex items-center justify-end gap-2.5">
               <button
                 onClick={() => setConfirmDelete(false)}
-                disabled={deleting}
+                disabled={deleteApplication.isPending}
                 className="text-sm px-4 py-2 rounded-[6px] text-gray-500 border border-[#E5E7EB] hover:bg-gray-50 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDelete}
-                disabled={deleting}
+                disabled={deleteApplication.isPending}
                 className="text-sm font-semibold px-4 py-2 rounded-[6px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
               >
-                {deleting ? "Deleting..." : "Yes, delete"}
+                {deleteApplication.isPending ? "Deleting..." : "Yes, delete"}
               </button>
             </div>
           </div>
@@ -737,7 +690,7 @@ Please help me improve my resume to address these gaps.`
                       <button
                         key={status}
                         onClick={() => handleStatusChange(status)}
-                        disabled={updatingStatus}
+                        disabled={updateApplication.isPending}
                         className={`px-3 py-1 rounded-full text-xs font-medium border-[1.5px] transition-all disabled:opacity-50 ${
                           application.status === status
                             ? STATUS_PILL_ACTIVE[status]
@@ -802,10 +755,10 @@ Please help me improve my resume to address these gaps.`
                   )}
                   <button
                     onClick={handleSaveNotes}
-                    disabled={!notesChanged || savingNotes}
+                    disabled={!notesChanged || updateApplication.isPending}
                     className="text-[13px] font-semibold px-4 py-[7px] bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] transition-colors"
                   >
-                    {savingNotes ? "Saving..." : "Save notes"}
+                    {updateApplication.isPending ? "Saving..." : "Save notes"}
                   </button>
                 </div>
               </div>
@@ -949,10 +902,10 @@ Please help me improve my resume to address these gaps.`
                 )}
                 <button
                   onClick={handleAnalyze}
-                  disabled={analyzing}
+                  disabled={analyzeResume.isPending}
                   className="text-[13px] font-semibold px-5 py-2 bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] transition-colors"
                 >
-                  {analyzing ? "Analysing..." : "Analyse resume"}
+                  {analyzeResume.isPending ? "Analysing..." : "Analyse resume"}
                 </button>
               </div>
             )}
@@ -972,10 +925,10 @@ Please help me improve my resume to address these gaps.`
                     <div className="text-[13px] font-semibold text-gray-900">Match Score</div>
                     <button
                       onClick={handleAnalyze}
-                      disabled={analyzing}
+                      disabled={analyzeResume.isPending}
                       className="text-[12px] text-gray-400 hover:text-[#FF6B35] transition-colors disabled:opacity-45"
                     >
-                      {analyzing ? "Analysing..." : "Reanalyse"}
+                      {analyzeResume.isPending ? "Analysing..." : "Reanalyse"}
                     </button>
                   </div>
                   <div className="flex items-end gap-3 mb-2">
@@ -1118,10 +1071,10 @@ Please help me improve my resume to address these gaps.`
                 <div className="flex items-center gap-3">
                   <button
                     onClick={handleCreateReminder}
-                    disabled={savingReminder}
+                    disabled={createReminder.isPending}
                     className="text-[13px] font-semibold px-4 py-2 bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] transition-colors"
                   >
-                    {savingReminder ? "Saving..." : "Set reminder"}
+                    {createReminder.isPending ? "Saving..." : "Set reminder"}
                   </button>
                   {reminderSaved && (
                     <span className="text-sm text-[#15803D] font-medium">Reminder set.</span>

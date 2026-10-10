@@ -7,8 +7,6 @@ Last updated: October 2026
 
 The dashboard is the first page after sign-in and works as a morning briefing: a greeting with today's date and a one-line status summary, a pipeline strip with counts per stage, and three cards: Recent Activity, an Activity Calendar, and Needs Attention. Company logos appear in Recent Activity and Needs Attention.
 
-This document replaces the earlier version, which described a previous layout (motivational quote, morning brief block, two-card bottom row).
-
 ---
 
 ## 2. Backend API Contract
@@ -92,22 +90,24 @@ Unexpected failures return `500 { "error": "Internal server error" }` or the thr
 frontend/app/(protected)/dashboard/page.tsx
 ```
 
-The page uses `useAuth()` for `getToken` and `useUser()` for the greeting name. On mount it gets a token and returns early if there is none; Clerk route protection handles the sign-in redirect. The page does not call `syncUser` itself; the protected layout does that on mount.
+The page uses `useUser()` for the greeting name, `useDashboardStats()` for stats, and `useApplications()` for the application list. It does not call `syncUser`; the protected layout mounts the shared `useUserSync()` query. Both dashboard hooks wait until that sync query succeeds before requesting data.
 
 ---
 
 ## 4. Data Sources and Client-Side Derivations
 
-The two data sources are fetched in parallel:
+The two data sources are independent user-scoped TanStack Query entries:
 
 ```ts
-const [statsData, appsData] = await Promise.all([
-  getDashboardStats(token),
-  getApplications(token),
-])
-setStats(statsData.stats)
-setApplications(appsData.applications)
+const statsQuery = useDashboardStats()
+const applicationsQuery = useApplications()
+const stats = statsQuery.data ?? null
+const applications = applicationsQuery.data ?? []
+const loading = statsQuery.isPending || applicationsQuery.isPending
+const error = statsQuery.error?.message ?? applicationsQuery.error?.message ?? null
 ```
+
+The cached application list is shared with the applications page. A refetch keeps cached data visible; `loading` is therefore a first-load state.
 
 ### Pipeline counts and peak stage
 
@@ -210,20 +210,16 @@ function timeAgo(dateStr: string) {
 ## 6. State Variables
 
 ```ts
-const [stats, setStats] = useState<DashboardStats | null>(null)
-const [applications, setApplications] = useState<Application[]>([])
-const [loading, setLoading] = useState(true)
-const [error, setError] = useState<string | null>(null)
 const [calendarMonth, setCalendarMonth] = useState(() => new Date())
 ```
 
-There is no global state or caching layer. The dashboard fetches a fresh snapshot on every mount and does not share it with the applications page.
+`calendarMonth` is the only page state. Server data and its loading/error state come from the two query hooks.
 
 ---
 
 ## 7. Loading and Error States
 
-- While loading, the header shows `Loading your status...`, pipeline counts show `0`, and the Recent Activity and Needs Attention cards show `Loading...`.
+- On the first load, the header shows `Loading your status...`, pipeline counts show `0`, and the Recent Activity and Needs Attention cards show `Loading...`. Cached results stay rendered during a background refetch.
 - On error, the API error message is rendered in red in the header summary area.
 
 ---
@@ -246,5 +242,4 @@ There is no global state or caching layer. The dashboard fetches a fresh snapsho
 - The stats fields other than `totalApplications` are fetched but unused.
 - The pipeline strip does not include `REJECTED`, so users cannot see their rejection count on the dashboard.
 - The calendar shows only status-change dates for the month being viewed.
-- The dashboard uses the orange `#FC8019`, while the applications pages use the brand orange `#FF6B35`. The two should be unified in a design pass.
 - Applications without a stored `companyDomain` show a letter avatar in place of a logo.

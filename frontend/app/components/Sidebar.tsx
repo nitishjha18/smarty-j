@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useUser, useClerk } from "@clerk/nextjs"
 import { LayoutDashboard, BriefcaseBusiness, User, LogOut } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
 
 const navLinks = [
   {
@@ -28,6 +29,7 @@ export default function Sidebar() {
   const pathname = usePathname()
   const { user } = useUser()
   const { signOut } = useClerk()
+  const queryClient = useQueryClient()
 
   const initials =
     user?.firstName && user?.lastName
@@ -97,7 +99,10 @@ export default function Sidebar() {
         </div>
 
         <button
-          onClick={() => signOut({ redirectUrl: "/sign-in" })}
+          onClick={() => {
+            queryClient.clear()
+            signOut({ redirectUrl: "/sign-in" })
+          }}
           className="flex-shrink-0 text-[#9CA3AF] hover:text-[#DC2626] transition-colors bg-transparent border-0 p-0 cursor-pointer"
         >
           <LogOut size={14} />

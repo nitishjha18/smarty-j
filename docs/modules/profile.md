@@ -1,7 +1,7 @@
 # ApplynTrack — Profile Module
 
-Status: Built — UI redesign pending
-Last updated: September 2026
+Status: Built
+Last updated: October 2026
 
 ## 1. Module Overview
 
@@ -108,11 +108,11 @@ app/(protected)/profile/page.tsx
 
 ### Profile section
 
-The profile section renders `name`, `targetRole`, and `experienceLevel` text inputs. `GET /api/user/profile` loads them on mount. `name` has a value from Clerk user creation; for new users, `targetRole` and `experienceLevel` can be `null`, so initialize them with `?? ""`.
+The profile section renders `name`, `targetRole`, and `experienceLevel` text inputs. `useProfile()` owns the `GET /api/user/profile` request and its user-scoped cache. The fields initialize once per fetched profile ID, with `?? ""` for nullable values, so a refetch does not overwrite edits in progress.
 
 The Save button calls `PUT /api/user/profile` with the current three fields.
 
-- On success, update the profile state in place and show `Profile saved.` below the button.
+- On success, `useUpdateProfile()` writes the returned user into the profile cache and shows `Profile saved.` below the button.
 - On failure, render the API error message in red below the button.
 
 ### Resume section
@@ -147,36 +147,25 @@ Before calling the API:
 1. When no file is selected, show `Please select a PDF file.` and return.
 2. When `selectedFile.type !== "application/pdf"`, show `Only PDF files are allowed.` and return.
 
-On success, use the `POST /api/user/resume` response to:
-
-1. Update `profile.resumeUrl` in state immediately.
-2. Avoid a full profile re-fetch.
-3. Set `selectedFile` to `null`.
-4. Show `Resume uploaded successfully.`.
+On success, `useUploadResume()` writes the returned `resumeUrl` and `resumeText` into the cached profile, replaces all cached resume analyses for the signed-in user with `null`, clears `selectedFile` and the file input, and shows `Resume uploaded successfully.`. No full profile re-fetch is needed.
 
 ---
 
 ## 5. State Variables
 
 ```ts
-const [profile, setProfile] = useState<User | null>(null)
-const [loading, setLoading] = useState(true)
-const [error, setError] = useState<string | null>(null)
-
 const [name, setName] = useState("")
 const [targetRole, setTargetRole] = useState("")
 const [experienceLevel, setExperienceLevel] = useState("")
-const [savingProfile, setSavingProfile] = useState(false)
 const [profileSaved, setProfileSaved] = useState(false)
 const [profileError, setProfileError] = useState<string | null>(null)
 
 const [selectedFile, setSelectedFile] = useState<File | null>(null)
-const [uploadingResume, setUploadingResume] = useState(false)
 const [uploadError, setUploadError] = useState<string | null>(null)
 const [uploadSuccess, setUploadSuccess] = useState(false)
 ```
 
-Each operation has its own loading boolean and error string, so profile saving and resume uploading can succeed or fail independently.
+Server data, initial loading, and query errors come from `useProfile()`. `useUpdateProfile()` and `useUploadResume()` expose their own `isPending` state; the page keeps only UI input and feedback state.
 
 ---
 
@@ -184,7 +173,7 @@ Each operation has its own loading boolean and error string, so profile saving a
 
 | State | What to show |
 |---|---|
-| Initial load in flight | **"Loading profile..."** full page |
+| Initial load in flight | Full-page `Skeleton` placeholders |
 | Load error | Error message in red, full page |
 | Profile not found | **"Profile not found."** — should not happen if `syncUser` ran on layout mount |
 | Saving profile | Save button shows **"Saving..."**, disabled |
@@ -193,24 +182,11 @@ Each operation has its own loading boolean and error string, so profile saving a
 | No file selected on upload | **"Please select a PDF file."** in red |
 | Non-PDF file selected | **"Only PDF files are allowed."** in red |
 | Upload in progress | Upload button shows **"Uploading..."**, disabled |
-| Upload success | **"Resume uploaded successfully."** in green; `resumeUrl` updates in place |
+| Upload success | **"Resume uploaded successfully."** in green; profile cache updates in place and cached resume analyses clear |
 | Upload error | Error message in red below the upload button |
 
-`getToken` is added to the `useEffect` dependency array with a null guard.
+The form initialization runs after profile data arrives and only once for that profile ID.
 
-Without this, `targetRole` and `experienceLevel` fields were appearing empty on mount even when values existed in the database — Clerk was not fully initialized when the effect first fired.
-
-```ts
-useEffect(() => {
-  const load = async () => {
-    const token = await getToken()
-    if (!token) return
-    // ...
-  }
-
-  load()
-}, [getToken])
-```
 
 ---
 
@@ -228,4 +204,4 @@ useEffect(() => {
 
 ## 8. Known Limitations
 
-No known limitations are documented for this page.
+- Resume files are served from a public Supabase Storage URL. Anyone with the URL can access the file.

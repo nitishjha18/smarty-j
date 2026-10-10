@@ -2,31 +2,19 @@
 "use client"
 
 import { useEffect } from "react"
-import { useAuth } from "@clerk/nextjs"
 import Sidebar from "../components/Sidebar"
-import { syncUser } from "../lib/api"
+import { useUserSync } from "../lib/queries"
 
 export default function ProtectedLayout({
   children
 }: {
   children: React.ReactNode
 }) {
-  const { getToken, isLoaded, isSignedIn } = useAuth()
+  const { error, isError } = useUserSync()
 
   useEffect(() => {
-    if (!isLoaded || !isSignedIn) return
-
-    const sync = async () => {
-      try {
-        const token = await getToken()
-        if (token) await syncUser(token)
-      } catch (err) {
-        console.error("User sync failed:", err)
-      }
-    }
-
-    sync()
-  }, [isLoaded, isSignedIn])
+    if (isError) console.error("User sync failed:", error)
+  }, [error, isError])
 
   return (
     <div className="flex h-screen bg-[#F4F5F7] overflow-hidden">
