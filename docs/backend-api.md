@@ -4,6 +4,10 @@ This document is the complete reference for the ApplynTrack backend API.
 It is written for frontend developers and AI assistants building the frontend.
 Do not modify the backend based on this document. The backend implementation is the source of truth.
 
+Last updated: October 2026
+
+Where the backend behaves differently from what a contract would normally promise, this document describes the real behavior and links to the matching entry in `docs/code-bugs.md`.
+
 ---
 
 ## Base URL
@@ -154,8 +158,8 @@ updatedAt
 Notes:
 
 - The database stores `missingKeywords`, `strongestPoints`, `redFlags`, and `suggestions` as JSON strings.
-- API responses parse those fields into arrays.
-- `suggestions` currently returns an empty array and is reserved for future use.
+- API responses parse `missingKeywords`, `strongestPoints` and `redFlags` into arrays. `suggestions` is parsed by the POST response only (see below).
+- `suggestions` is always stored as the JSON string `"[]"` and is reserved for future use. `POST /api/ai/analyze-resume` returns it as an empty array, but `GET /api/ai/resume-analysis/:appId` returns the raw string `"[]"` because the GET path does not parse it. Known issue — see `docs/code-bugs.md` CB-07.
 - There is at most one `ResumeAnalysis` per application. Re-running analysis overwrites the previous saved result.
 
 ### Reminder
@@ -233,6 +237,12 @@ Response 401:
 { "error": "Unauthorized" }
 ```
 
+Response 500:
+
+```json
+{ "error": "Internal server error" }
+```
+
 ---
 
 ### Get User Profile
@@ -261,11 +271,19 @@ Response 200:
 }
 ```
 
-Response 404:
+Response 401 when the Clerk user has no local user:
 
 ```json
-{ "error": "User not found" }
+{ "error": "User not found. Please sync first." }
 ```
+
+Response 500:
+
+```json
+{ "error": "Internal server error" }
+```
+
+The controller also contains a `404 { "error": "User not found" }` branch, but `requireUser` runs first, so that response is effectively never returned. See `docs/code-bugs.md` CB-14.
 
 ---
 
@@ -304,6 +322,8 @@ Response 200:
   }
 }
 ```
+
+Response 401 and 500: same as Get User Profile (`Unauthorized`; `User not found. Please sync first.`; `Internal server error`).
 
 ---
 
@@ -366,6 +386,19 @@ Response 500:
 ```json
 { "error": "Failed to upload to storage" }
 ```
+
+```json
+{ "error": "Internal server error" }
+```
+
+The last response also covers a PDF that `pdf2json` cannot parse.
+
+Known limits of this endpoint (see `docs/code-bugs.md` CB-02):
+
+- There is no file-size limit. `multer` uses memory storage with no `limits`.
+- The PDF check uses only the client-declared mimetype.
+- A `multer` error (for example an unexpected form field name) is not caught by the controller. The exact response was not verified; do not assume it has the `{ "error": ... }` shape.
+- A PDF with no extractable text is accepted and stored with empty `resumeText`.
 
 ---
 
@@ -606,6 +639,10 @@ Response 404:
 
 Deleting an application also cascades related `ResumeAnalysis` and `Reminder` rows through database relations. The service explicitly deletes related `StatusHistory` rows.
 
+### Applications module error responses
+
+Every Applications endpoint returns `500` for an unexpected failure. The body is `{ "error": <raw error message> }`, which can be a Prisma or database message, or `"Internal server error"` when a non-`Error` value is thrown. Single-application endpoints return `404 { "error": "Application not found" }` when the application does not exist or belongs to another user. There is no request-body validation: an invalid `status` or `source` value surfaces as a `500` with the Prisma message. See `docs/code-bugs.md` CB-01.
+
 ---
 
 ## AI Module
@@ -681,6 +718,8 @@ Response 400:
 { "error": "No job description found for this application." }
 ```
 
+Any other `Error` thrown while analysing (for example a Gemini or database failure) is also returned as `400` with the raw error message. `500 { "error": "Internal server error" }` is returned only when a non-`Error` value is thrown. Known issue — see `docs/code-bugs.md` CB-01.
+
 ---
 
 ### Get Saved Resume Analysis
@@ -708,12 +747,14 @@ Response 200 when analysis exists:
       "The resume does not clearly show production cloud deployment experience."
     ],
     "recruiterTake": "A promising backend candidate, but the resume should show stronger evidence of cloud and scaling experience.",
-    "suggestions": [],
+    "suggestions": "[]",
     "createdAt": "2026-09-20T01:22:57.000Z",
     "updatedAt": "2026-09-20T01:22:57.000Z"
   }
 }
 ```
+
+`suggestions` is the string `"[]"`, not an array, in this response. The POST response returns `[]`. The frontend does not read the field. Known issue — see `docs/code-bugs.md` CB-07.
 
 Response 200 when no saved analysis exists:
 
@@ -727,6 +768,8 @@ Response 400:
 { "error": "Application not found." }
 ```
 
+As with the POST endpoint, any other `Error` is returned as `400` with its raw message (CB-01).
+
 Important frontend behavior:
 
 - Call `POST /api/ai/analyze-resume` to generate or refresh analysis.
@@ -738,6 +781,8 @@ Important frontend behavior:
 ## Reminders Module
 
 There is no list reminders endpoint currently. Reminders can be created, updated, and deleted.
+
+Error handling for all three reminder endpoints: any `Error` thrown by the service (including database failures) is returned as `400` with the raw message. `500 { "error": "Internal server error" }` is returned only when a non-`Error` value is thrown. See `docs/code-bugs.md` CB-01.
 
 ---
 
@@ -808,6 +853,8 @@ Request body:
 Required: `reminderDate`
 
 Optional: `notes`
+
+This endpoint updates only `reminderDate` and `notes`. It does not reset `isSent`, so a reminder that has already been sent stays `isSent: true` after a reschedule, and the cron job (which selects only `isSent: false`) never sends it again. Known issue — see `docs/code-bugs.md` CB-10.
 
 Response 200:
 
@@ -901,7 +948,8 @@ Field notes:
 - `responseRate` is the percentage of applications that moved past `APPLIED`.
 - `rejectionRate` is the percentage of applications with `REJECTED` status.
 - `bestSource` is the `ApplicationSource` enum value with the most non-`APPLIED` applications, or `null` if there are no responses.
-- `staleApplications` counts applications still in `APPLIED` status after more than 14 days.
+- `staleApplications` counts applications with status `APPLIED` whose `dateApplied` is earlier than the current time minus 14 days (server local time, strict `<`). The frontend does not use this field; the dashboard computes its own count. The product has five different "stale" definitions — see `docs/code-bugs.md` CB-04.
+- `GET /api/dashboard/stats` returns `500 { "error": "Internal server error" }` on an unexpected failure.
 - Rates are rounded integers from 0 to 100.
 
 ---
@@ -910,17 +958,21 @@ Field notes:
 
 The following items are intentionally deferred until after the functional frontend is complete. Do not implement these during frontend development unless the backend task explicitly asks for them.
 
-- Global error handler middleware. Most controllers still handle errors with local try/catch blocks.
-- Input validation with Zod or a similar validator. Request body validation is currently manual and incomplete.
-- `.gitignore` cleanup. `dist`, generated Prisma files, and environment files may not be fully ignored.
-- Automated tests. No backend test suite exists yet.
-- Reminder delivery hardening. The reminder job exists, but API documentation only covers CRUD endpoints.
+- Global error handler middleware. Every controller handles errors with its own try/catch block and the status codes differ by module (CB-01).
+- Input validation with Zod or a similar validator. Request body validation is currently manual and incomplete (CB-01).
+- Resume upload limits. No file-size limit, and multer errors are not handled (CB-02).
+- `.gitignore` cleanup. `backend/dist` and `backend/src/generated/prisma` are tracked in git, and the backend ignore file lists the wrong Prisma path (CB-03).
+- Unused backend dependencies (CB-11).
+- Automated tests. No backend test suite exists yet (CB-01).
+- Reminder delivery hardening. The reminder job exists, but this document only covers CRUD endpoints; known reminder issues are CB-09 and CB-10.
+
+All items are tracked in `docs/code-bugs.md`.
 
 ---
 
 ## Notes For Frontend Development
 
-- Never hardcode `http://localhost:5000`; always use `process.env.NEXT_PUBLIC_API_URL`.
+- Never hardcode `http://localhost:5000`; always use `process.env.NEXT_PUBLIC_API_URL`. The frontend itself falls back to `http://localhost:5000` when the variable is missing (CB-05).
 - Never send `userId` from the frontend. The backend reads the user from the Clerk token and local database.
 - The protected frontend layout runs the shared `POST /api/user/sync` query after sign-in; other frontend queries wait for it to succeed.
 - The `requireUser` middleware attaches the local DB user to the request for protected routes.

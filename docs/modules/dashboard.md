@@ -37,7 +37,7 @@ Response `200`:
 | `responseRate` | Integer percentage of applications that moved past `APPLIED` |
 | `rejectionRate` | Integer percentage of applications with `REJECTED` status |
 | `bestSource` | `ApplicationSource` value with the most non-`APPLIED` responses, or `null` |
-| `staleApplications` | Applications still in `APPLIED` after 14 or more days |
+| `staleApplications` | Applications with status `APPLIED` whose `dateApplied` is earlier than the current time minus 14 days (server local time, strict `<`). Not used by the page, which computes its own count; see the stale note in Section 9 and `docs/code-bugs.md` CB-04 |
 
 The page reads only `totalApplications`. The other fields are fetched but not displayed.
 
@@ -239,6 +239,8 @@ const [calendarMonth, setCalendarMonth] = useState(() => new Date())
 
 - The `Today` label in Recent Activity applies to every entry from the current 24-hour window regardless of time of day, so a status changed at 11pm and one at 1am can both show `Today`.
 - The stale threshold is hardcoded to 14 days on the client to match the backend definition. If the backend threshold changes, the client must be updated manually. The page does not use `stats.staleApplications`.
+- "Stale" is defined five different ways across the product: the backend stat (`APPLIED`, strictly more than 14 days), this page (`APPLIED`, whole days since `dateApplied` `>= 14`), the Applications header chip (`APPLIED`, elapsed time `>= 14` days), the Applications card badge (any status, days since the last status change), and the PRD ("no status change in fourteen plus days"). This page and the backend can differ by a day at the boundary. Known issue — see `docs/code-bugs.md` CB-04.
+- The summary line in the header says an application "has had no update in 14+ days", but the count only includes applications still in `APPLIED` status. An application that has moved on to another stage and then gone quiet is not counted.
 - The stats fields other than `totalApplications` are fetched but unused.
 - The pipeline strip does not include `REJECTED`, so users cannot see their rejection count on the dashboard.
 - The calendar shows only status-change dates for the month being viewed.

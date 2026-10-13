@@ -42,7 +42,7 @@ Express REST API (Node.js)
 
 | Layer | Technology | Reason |
 |---|---|---|
-| Framework | Next.js 16 (App Router) | Server components, file-based routing, built-in TypeScript support. App Router gives layout-level auth wrapping. |
+| Framework | Next.js 16 (App Router) | File-based routing, built-in TypeScript support, and layout-level auth wrapping. All data-driven pages are client components; see Section 2b. |
 | Language | TypeScript | Type safety across the frontend-backend boundary. Field name mismatches become compile errors. |
 | Styling | Tailwind CSS 4 | Utility-first, no context switching between CSS files and components. |
 | Auth | Clerk (`@clerk/nextjs`) | Handles Google OAuth, token issuance, session management, and route protection with minimal configuration. |
@@ -59,7 +59,7 @@ Express REST API (Node.js)
 | ORM | Prisma | Generates TypeScript types from the schema. Query builder is readable. Migration system is explicit. Raw SQL alternatives like Drizzle were considered but Prisma's generated types provide better safety for a solo project. |
 | Database | PostgreSQL via Supabase | Relational model fits the data — users, applications, status history, reminders all have foreign key relationships. Supabase provides the managed PostgreSQL instance, Storage, and a dashboard for inspecting data during development. |
 | Auth middleware | Clerk Express SDK | Validates Clerk-issued JWTs without implementing token verification manually. |
-| AI | Google Gemini (`gemini-3.6-flash`) | Available via REST API, no self-hosting required, free tier sufficient for development. Model selected by trial — earlier models (1.5-flash, 2.0-flash) returned 404 at the time of development. |
+| AI | Google Gemini (`gemini-3.6-flash`) | Available via REST API, no self-hosting required, free tier sufficient for development. Model selected by trial — earlier models (1.5-flash, 2.0-flash) returned 404 at the time of development. The model name is hardcoded in `backend/src/config/gemini.ts`. |
 | Email | Resend | Simple REST API for transactional email. Custom domain (applyntrack.online) verified for professional sender identity. |
 | File storage | Supabase Storage | Already using Supabase for the database. Using the same platform for file storage avoids a second vendor. |
 | Scheduler | node-cron | Runs inside the Express process. No external scheduler (like Vercel Cron or AWS EventBridge) required. Acceptable for a monolith deployed on a single Railway instance. |
@@ -72,7 +72,7 @@ Layout: protected routes are wrapped in `app/(protected)/layout.tsx`. It runs `u
 
 State management: `app/providers.tsx` creates one `QueryClient` with React state and renders it inside `ClerkProvider`. `app/lib/queryKeys.ts` creates user-scoped keys; `app/lib/queries.ts` contains the query and mutation hooks. Page components keep only UI state such as active tabs, modal visibility, form inputs, and temporary success feedback.
 
-API calls: all calls go through `frontend/app/lib/api.ts`, from query and mutation functions in `frontend/app/lib/queries.ts`. No page makes raw fetch calls directly. Resume upload bypasses `apiFetch` and uses raw fetch with FormData; do not set Content-Type manually.
+API calls: all calls to the Express backend go through `frontend/app/lib/api.ts`, from query and mutation functions in `frontend/app/lib/queries.ts`. No page makes raw fetch calls directly. Resume upload bypasses `apiFetch` and uses raw fetch with FormData inside `api.ts`; do not set Content-Type manually. The one other `fetch` call is the Brandfetch Brand Search request in `components/CompanySearchInput.tsx`, which goes straight from the browser to Brandfetch (see Section 6b).
 
 Auth: `useAuth()` provides `getToken()`. Every query and mutation gets a fresh token immediately before its API call. `useUserSync()` is enabled only for a loaded, signed-in Clerk user; all other queries are enabled only after that shared sync query succeeds. `useUser()` provides user display name for the greeting.
 
@@ -82,8 +82,9 @@ Component structure:
 - `components/CompanyLogo.tsx` — company logo with letter-avatar fallback, used on the board, detail page, dashboard, and the create form
 - `components/CompanySearchInput.tsx` — company name autocomplete on the create page, backed by the Brandfetch Brand Search API
 - `providers.tsx` — QueryClient provider and development-only React Query Devtools
-- All pages are client components (`"use client"`)
-- No server components in use currently
+- Every data-driven page and the protected layout are client components (`"use client"`)
+- Server components are used only for static shells with no data fetching: the root `app/layout.tsx`, the home page `app/page.tsx` (currently a placeholder that renders only a `Job Tracker` heading; see `docs/code-bugs.md` CB-15), the sign-in page, and `components/Skeleton.tsx`
+- Route protection is also enforced in `frontend/middleware.ts` (Clerk `clerkMiddleware`): every route except `/`, `/sign-in(.*)` and `/sign-up(.*)` calls `auth.protect()`
 
 Design system: Inter is applied at the root. The shell and dashboard use orange `#FC8019`, with white surfaces, `#F4F5F7` page background, `#111827` primary text, and `#6B7280` secondary text. Borders use `#E5E7EB` or `#F0F1F4`; active navigation uses `#FFF4EC`. Statuses use blue, amber, purple, orange, green, and rose/red accents. Individual form and detail controls also use local orange values. The application is light-mode oriented, although `globals.css` defines a dark system-color override.
 
@@ -166,8 +167,8 @@ A single `status` field on Application records only the current state. It answer
 A separate StatusHistory table records every transition with a timestamp. This enables:
 - Full audit trail of how an application progressed
 - Duration calculations per stage (how many days in Screening before Interview)
-- Dashboard analytics like response rate (applications that moved past APPLIED)
-- A timeline view in the UI
+- Dashboard analytics like response rate (applications that moved past APPLIED), and the Recent Activity feed and Activity Calendar on the dashboard
+- A status history list on the application detail page
 
 StatusHistory records are created automatically in two places:
 1. When an application is created — an APPLIED record is inserted in the same transaction
@@ -203,10 +204,10 @@ Frontend sends: Authorization: Bearer <token> on every request
         │
         ▼
 Backend: clerkMiddleware() validates the token signature
-         Attaches Clerk userId to req.auth.userId
+         Attaches Clerk's auth context to the request
         │
         ▼
-Backend: requireUser middleware reads req.auth.userId
+Backend: requireUser middleware reads the Clerk userId with getAuth(req)
          Looks up the local User row by clerkId
          Attaches the local User to req.user
         │
@@ -216,13 +217,13 @@ Controllers read req.user.id for all database queries
 
 ### clerkAuth vs requireUser
 
-`clerkAuth` is `clerkMiddleware()` from the Clerk Express SDK. It runs globally on every request. It validates the JWT and attaches Clerk's auth context to the request. It does not touch the database.
+`clerkAuth` is `clerkMiddleware()` from the Clerk Express SDK. It runs globally on every request (`app.use(clerkAuth)` in `index.ts`). It validates the JWT and attaches Clerk's auth context to the request. It does not reject unauthenticated requests and does not touch the database.
 
-`requireUser` is a custom middleware that runs on protected routes. It reads the Clerk userId from the request, queries the local User table, and attaches the result to `req.user`. If no local user is found it returns 401.
+`requireUser` is a custom middleware that runs on protected routes. It reads the Clerk userId from the request with `getAuth(req)`, returns `401 { "error": "Unauthorized" }` when there is none, queries the local User table, and attaches the result to `req.user`. If no local user is found it returns `401 { "error": "User not found. Please sync first." }`. Every route except `/health` and `POST /api/user/sync` is behind it.
 
 ### The Chicken-and-Egg Problem
 
-`POST /api/user/sync` uses `clerkAuth` but not `requireUser`.
+`POST /api/user/sync` uses `clerkAuth` but not `requireUser`. The sync controller itself returns `401 { "error": "Unauthorized" }` when the request has no Clerk userId, and `500 { "error": "Internal server error" }` on unexpected failures.
 
 This is intentional. When a user signs in for the first time, they exist in Clerk but not in the local database. If `requireUser` ran on the sync route, it would look for the local user, find nothing, and return 401 — making it impossible to ever create the local user.
 
@@ -234,12 +235,14 @@ The sync route receives the Clerk userId from the validated token, looks up the 
 
 ### Why GET /api/dashboard/stats is a server-side endpoint
 
-The alternative is to fetch all applications on the frontend and compute the stats in JavaScript. This would work at small scale but has two problems:
+The original reasoning was to avoid fetching all applications on the frontend just to compute counts, and to keep analytics logic ("stale" and "bestSource") on the server where other clients could reuse it. A dedicated endpoint returns only the numbers.
 
-1. It transfers every application record to the client just to count them. With hundreds of applications this becomes an unnecessary payload.
-2. Business logic for defining "stale" (14+ days in APPLIED) and "bestSource" (source with most non-APPLIED responses) lives in the client, which means it can't be reused by other clients or tested independently.
+In the current frontend that reasoning only partly holds:
 
-A dedicated endpoint keeps analytics logic on the server where it belongs and returns only the numbers the frontend needs.
+1. The dashboard page does fetch the full applications list (`useApplications()`) in addition to the stats, because it derives the pipeline strip, the stale list, Recent Activity, and the calendar from it on the client.
+2. The page reads only `totalApplications` from the stats response. The stale list it shows is computed on the client, not taken from `stats.staleApplications`, so the stale rule exists in more than one place and the copies can disagree (see `docs/code-bugs.md` CB-04).
+
+The endpoint is therefore a small, cheap summary, and its other fields (`responseRate`, `rejectionRate`, `bestSource`, `staleApplications`) are reserved for a future Analytics page.
 
 ### Why statusHistory is embedded in GET /api/applications responses
 
@@ -301,6 +304,12 @@ Return ONLY a JSON object with exactly this structure:
   "redFlags": <array of 1-3 strings>,
   "recruiterTake": <single sentence string>
 }
+
+matchScore: how well the resume matches the job description.
+strongestPoints: what in the resume aligns well with this JD.
+redFlags: specific gaps or concerns a recruiter would notice.
+recruiterTake: one honest sentence summarising how a recruiter would view this resume for this role.
+
 Return ONLY the JSON object. No explanation, no markdown, no extra text.
 
 RESUME:
@@ -310,12 +319,13 @@ JOB DESCRIPTION:
 [job description]
 ```
 
-The response is cleaned of markdown fences and parsed as JSON. The parsed Gemini result is combined with the locally computed missing keywords, then saved through a Prisma upsert:
+`[experienceLevel]` falls back to `fresher` and `[targetRole]` to `software` when the profile fields are empty. The response is cleaned of markdown fences and parsed as JSON; the parsed values are not validated, so malformed Gemini output surfaces as a thrown error. The parsed Gemini result is combined with the locally computed missing keywords, then saved through a Prisma upsert:
 
 - `matchScore` is stored as an integer.
 - `missingKeywords`, `strongestPoints`, `redFlags`, and `suggestions` are stored as JSON strings because the Prisma model uses `String` columns for those fields.
-- API responses parse those JSON strings back into arrays for the frontend.
+- `POST /api/ai/analyze-resume` parses all four JSON strings back into arrays. `GET /api/ai/resume-analysis/:appId` parses `missingKeywords`, `strongestPoints`, and `redFlags` but not `suggestions`, so it returns `"suggestions": "[]"` as a string. The frontend does not read the field (known issue — `docs/code-bugs.md` CB-07).
 - `suggestions` currently stores `[]` and is reserved for future expansion.
+- Any `Error` thrown while analysing, including a Gemini or database failure, is returned to the client as `400` with the raw message (`docs/code-bugs.md` CB-01).
 
 ### Why ResumeAnalysis Is Saved
 
@@ -372,7 +382,7 @@ The query finds all Reminder records where:
 - `reminderDate` is within today's UTC date range
 - `isSent` is false
 
-After sending each email, the record is updated with `isSent: true`. This prevents duplicate sends if the job runs again (which it shouldn't, but the field guards against edge cases).
+After sending each email, the record is updated with `isSent: true`. This prevents duplicate sends if the job runs again (which it shouldn't, but the field guards against edge cases). Each send is wrapped in its own try/catch, so one failed email does not stop the others. The callback as a whole has no outer try/catch, so a failure in the initial reminder query is not handled (`docs/code-bugs.md` CB-01). `PUT /api/reminders/:id` does not reset `isSent`, so a reminder that was already sent and then rescheduled is never sent again (`docs/code-bugs.md` CB-10).
 
 ### Why node-cron Instead of an External Scheduler
 
@@ -382,9 +392,9 @@ The trade-off is that if the server is down at 9am, reminders for that day are m
 
 ### Resend
 
-The Resend SDK sends transactional email via their REST API. The `from` address is `reminders@applyntrack.online`. The domain `applyntrack.online` was verified on Resend by adding DKIM, SPF, and DMARC DNS records on Hostinger.
+The Resend SDK sends transactional email via their REST API. The `from` address is read from the `RESEND_FROM_EMAIL` environment variable (`backend/src/utils/email.ts`); it is not hardcoded. The domain `applyntrack.online` was verified on Resend by adding DKIM, SPF, and DMARC DNS records on Hostinger.
 
-Emails are sent as HTML with inline styles. A plain `text` fallback is not currently included — email clients that don't render HTML will see nothing. This is a known gap.
+The subject is `Reminder — {jobTitle} at {companyName}`, and the body greets the user with their full stored name. Emails are sent as HTML with inline styles. The name, job title, company name, and note are inserted into the HTML without escaping (`docs/code-bugs.md` CB-09). A plain `text` fallback is not currently included — email clients that don't render HTML will see nothing. This is a known gap.
 
 ---
 
@@ -397,6 +407,8 @@ Supabase Storage was chosen because the project was already using Supabase for P
 Files are stored in a public bucket named `resumes`. Each user's file is stored at path `{userId}/resume.pdf`. This ensures no filename collisions between users and makes it trivial to find or delete a user's resume.
 
 `upsert: true` is set on upload, which overwrites the file if it already exists. This supports the use case of re-uploading an updated resume without leaving orphaned files.
+
+The bucket is public, so anyone with a resume URL can read the file. `multer` is configured with memory storage and no `limits`, so the upload has no size cap, and a multer error is not caught by the controller (known issue — `docs/code-bugs.md` CB-02).
 
 ### pdf2json
 
@@ -432,15 +444,15 @@ The extracted text is stored in `User.resumeText`. It is not cleaned or normaliz
 
 ### Global Error Handler
 
-Each controller has its own try/catch block. There is no centralized Express error handler (`app.use((err, req, res, next) => {})`). If an error escapes a try/catch, the server crashes. This is acceptable during development where the developer is present, but must be added before production deployment.
+Each controller has its own try/catch block. There is no centralized Express error handler (`app.use((err, req, res, next) => {})`) and no handler for unknown routes. Errors thrown inside an async route handler that escape its try/catch fall through to Express's default error response. Rejections outside the request cycle, such as the reminder cron callback, are not handled at all and surface as unhandled promise rejections. The effect on the process was inferred from the code and Express 5 behavior, not reproduced by running it. A global handler must be added before production deployment (`docs/code-bugs.md` CB-01).
 
 ### Zod Input Validation
 
-No request body validation exists. Prisma will reject fields that don't match the schema type but will not validate business rules like required fields or enum values. Invalid input can produce unhelpful Prisma error messages. Zod schemas for each endpoint's request body are planned for the hardening phase.
+No request body validation exists. Prisma will reject fields that don't match the schema type but will not validate business rules like required fields or enum values. Invalid input can produce unhelpful Prisma error messages. Zod schemas for each endpoint's request body are planned for the hardening phase (`docs/code-bugs.md` CB-01).
 
 ### Automated Tests
 
-No unit tests, integration tests, or end-to-end tests exist. The application was tested manually in Postman during development. Tests are required before the codebase is considered production-ready.
+No unit tests, integration tests, or end-to-end tests exist in either project, and neither `package.json` has a test script. The application was tested manually in Postman during development. Tests are required before the codebase is considered production-ready (`docs/code-bugs.md` CB-01, `before-beta.md` §6.5).
 
 ### Mobile App
 
@@ -466,14 +478,41 @@ The frontend uses a consistent light-oriented shell, dashboard, application, and
 
 ## 11. Known Technical Debt
 
-**No global error handler**
-Unhandled promise rejections and thrown errors outside try/catch blocks will crash the server. This is a reliability risk in production.
+**No global error handler** (CB-01)
+There is no error-handling middleware, no 404 handler, and no process-level `unhandledRejection` handler. Errors outside a try/catch (including the reminder cron callback) are not handled, and several controllers return raw `Error.message` text to the client (`400` for AI and reminders, `500` for applications). This is a reliability and information-exposure risk in production.
 
-**No input validation**
+**No input validation** (CB-01)
 All endpoints accept arbitrary JSON bodies. Prisma rejects type mismatches but does not enforce required fields or valid enum values at the application layer.
 
-**Local API URL fallback**
+**No automated tests** (CB-01)
+Neither project has tests or a test script.
+
+**Resume upload: no size limit, multer errors unhandled** (CB-02)
+`multer` is configured with memory storage and no limits, the PDF check trusts the client-declared mimetype, and a PDF with no extractable text is accepted.
+
+**Tracked build output and generated Prisma client** (CB-03)
+`backend/dist/` and `backend/src/generated/prisma/` are committed, `backend/.gitignore` lists the wrong generated path (`/generated/prisma`) and does not ignore `dist`, and the root `.gitignore` has no `.env*`, `node_modules` or `dist` rule.
+
+**Five definitions of "stale"** (CB-04)
+The backend stat, the dashboard page, the Applications header chip, the Applications card badge, and the PRD each define a stale application differently.
+
+**Local API URL fallback** (CB-05)
 `frontend/app/lib/api.ts` falls back to `http://localhost:5000` when `NEXT_PUBLIC_API_URL` is missing, and `frontend/next.config.ts` contains a localhost API rewrite. Production deployment should provide the environment variable and review the rewrite so frontend API traffic points at the deployed backend.
+
+**Sidebar target role source** (CB-06)
+`Sidebar.tsx` reads `targetRole` from Clerk `publicMetadata`, which the app never writes, instead of from the saved profile.
+
+**GET analysis returns `suggestions` as a string** (CB-07)
+`GET /api/ai/resume-analysis/:appId` does not parse `suggestions`; `POST /api/ai/analyze-resume` does.
+
+**Reminders** (CB-08, CB-09, CB-10, CB-13)
+The Reminder tab text promises update and delete controls that do not exist, the email HTML does not escape user text, `PUT /api/reminders/:id` does not reset `isSent`, and the client helpers `updateReminder` and `deleteReminder` are unused.
+
+**Unused backend packages and a personal ngrok host** (CB-11)
+`axios`, `jsonwebtoken`, `@types/jsonwebtoken` and `@types/pdf-parse` are not used by the backend source, and `frontend/next.config.ts` lists a personal ngrok host in `allowedDevOrigins`.
+
+**Stale comments and placeholder page** (CB-12, CB-14, CB-15)
+Comments in the applications page cite a nonexistent `docs/context.md`, `getProfileController` has an effectively unreachable 404 branch, and the home page is a placeholder.
 
 **resumeText stored as raw extracted text**
 The text extracted from PDFs includes spacing artifacts and layout noise from the PDF engine. This is sent directly to Gemini without cleaning. It works in practice but cleaner text would produce better AI results.

@@ -43,7 +43,7 @@ Response `200`:
 { "user": { "id": "...", "clerkId": "...", "name": "...", "email": "...", "profilePicture": "...", "targetRole": "...", "experienceLevel": "...", "resumeUrl": "...", "resumeText": "...", "createdAt": "...", "updatedAt": "..." } }
 ```
 
-Errors: missing or invalid token returns `401 { "error": "Unauthorized" }`; no local user returns `404 { "error": "User not found" }`; unexpected failures return `500 { "error": "Internal server error" }`.
+Errors: missing or invalid token returns `401 { "error": "Unauthorized" }`; a valid Clerk token without a local user returns `401 { "error": "User not found. Please sync first." }` (from `requireUser`, the same as every other protected route); unexpected failures return `500 { "error": "Internal server error" }`. The controller also contains a `404 { "error": "User not found" }` branch, but `requireUser` runs first, so that response is effectively never returned (see `docs/code-bugs.md` CB-14).
 
 ### PUT /api/user/profile
 
@@ -92,7 +92,9 @@ Response `200`:
 }
 ```
 
-Errors: `400 { "error": "No file uploaded" }`; `400 { "error": "Only PDF files are allowed" }`; `500 { "error": "Failed to upload to storage" }`; unexpected failures return `500 { "error": "Internal server error" }`.
+Errors: `400 { "error": "No file uploaded" }`; `400 { "error": "Only PDF files are allowed" }`; `500 { "error": "Failed to upload to storage" }`; unexpected failures return `500 { "error": "Internal server error" }`, including a PDF that `pdf2json` cannot parse.
+
+The upload has no file-size limit, and the PDF check uses only the client-declared mimetype. Errors raised by `multer` itself (for example an unexpected form field name) are not caught by the controller, and the exact response was not verified; do not rely on it having the `{ "error": ... }` shape. A PDF with no extractable text (for example a scanned image) is accepted and stored with empty `resumeText`. Known issue — see `docs/code-bugs.md` CB-02.
 
 ---
 
@@ -121,21 +123,20 @@ The resume stored here is the input to Resume Analysis for every application.
 
 #### No Resume Uploaded
 
-Render a dashed, muted-text card with:
+Render a muted card with a dashed border (`#D1D5DB`) on a light gray background (`#F9FAFB`), containing:
 
 - `No resume uploaded yet.`
 - `Upload a resume to unlock AI resume analysis on your applications.`
-- A file picker and `Upload` button.
 
-The empty-state border color is `#E5E7EB`.
+Below the card, a file picker labelled `Upload resume` and an `Upload` button render. The picker is a `Choose File` button with a file-name label that reads `No file chosen` until a file is selected; the native input is hidden and accepts `.pdf`.
 
 #### Resume Uploaded
 
-Render a green-bordered card with a checkmark rendered as text (`✓`) and:
+Render an orange-tinted card (background `#FFF8F5`, border `#FFD9C7`) with a filled orange circle holding a white SVG checkmark (not a text character) and:
 
 - `Resume uploaded`
 - A `View current resume` link that opens the Supabase URL in a new tab
-- A file picker labelled `Replace resume`
+- Below the card, the same file picker, labelled `Replace resume`
 - An `Upload` button
 
 Replacing is the same upload flow; the backend overwrites the user's existing `resume.pdf` and returns the new URL.
@@ -205,3 +206,5 @@ The form initialization runs after profile data arrives and only once for that p
 ## 8. Known Limitations
 
 - Resume files are served from a public Supabase Storage URL. Anyone with the URL can access the file.
+- The sidebar shows the user's target role from Clerk `publicMetadata.targetRole` (`frontend/app/components/Sidebar.tsx:39`), not from the profile saved here. The app never writes that metadata, so the role entered on this page does not appear in the sidebar. Known issue — see `docs/code-bugs.md` CB-06.
+- The resume upload has no size limit and does not reject a PDF with no extractable text. See `docs/code-bugs.md` CB-02.

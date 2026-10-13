@@ -80,6 +80,8 @@ Errors:
 - `400 { "error": "companyName, jobTitle, and source are required" }`
 - unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message
 
+No body validation exists beyond the required-field check. An invalid `source` or `dateApplied` value reaches Prisma and fails there. Known issue — see `docs/code-bugs.md` CB-01.
+
 ### GET /api/applications
 
 No request body. Applications are ordered by `dateApplied` descending and include `statusHistory`, ordered newest first.
@@ -243,7 +245,10 @@ Errors:
 - `400 { "error": "Resume not found. Please upload your resume first." }`
 - `400 { "error": "Application not found." }`
 - `400 { "error": "No job description found for this application." }`
-- unexpected non-Error failures return `500 { "error": "Internal server error" }`
+- any other thrown `Error`, including a database or Gemini failure, also returns `400` with that error's raw message
+- `500 { "error": "Internal server error" }` is returned only when the thrown value is not an `Error`
+
+The generic `400` is a known issue — see `docs/code-bugs.md` CB-01.
 
 ### GET /api/ai/resume-analysis/:appId
 
@@ -265,12 +270,14 @@ Response `200` when analysis exists:
       "The resume does not clearly show production cloud deployment experience."
     ],
     "recruiterTake": "A promising backend candidate, but the resume should show stronger evidence of cloud and scaling experience.",
-    "suggestions": [],
+    "suggestions": "[]",
     "createdAt": "2026-09-20T01:22:57.000Z",
     "updatedAt": "2026-09-20T01:22:57.000Z"
   }
 }
 ```
+
+`missingKeywords`, `strongestPoints`, and `redFlags` are returned as arrays, but this endpoint does not parse `suggestions`: it comes back as the JSON string `"[]"`, not the array `[]` that `POST /api/ai/analyze-resume` returns. The frontend never reads `suggestions`, so the AI tab is not affected after a reload. Known issue — see `docs/code-bugs.md` CB-07.
 
 Response `200` when no saved analysis exists:
 
@@ -281,7 +288,7 @@ Response `200` when no saved analysis exists:
 Errors:
 
 - `400 { "error": "Application not found." }`
-- unexpected non-Error failures return `500 { "error": "Internal server error" }`
+- any other thrown `Error` also returns `400` with its raw message; `500 { "error": "Internal server error" }` is returned only for a non-Error throw (known issue — `docs/code-bugs.md` CB-01)
 
 Important: uploading a new resume from the profile module deletes saved analyses for all of the user's applications. After a resume upload, this endpoint returns `null` until analysis is run again.
 
@@ -318,7 +325,7 @@ Errors:
 
 - `400 { "error": "applicationId and reminderDate are required" }`
 - `400 { "error": "Application not found." }`
-- unexpected non-Error failures return `500 { "error": "Internal server error" }`
+- any other thrown `Error` also returns `400` with its raw message; `500 { "error": "Internal server error" }` is returned only for a non-Error throw (known issue — `docs/code-bugs.md` CB-01)
 
 ### PUT /api/reminders/:id
 
@@ -333,11 +340,13 @@ Errors:
 
 Response `200` is `{ "reminder": { ... } }`.
 
+The update sets only `reminderDate` and `notes`. It does not reset `isSent`, so a reminder that has already been sent and is moved to a new date is never sent again (the cron job selects only `isSent: false`). Known issue — see `docs/code-bugs.md` CB-10.
+
 Errors:
 
 - `400 { "error": "reminderDate is required" }`
 - `400 { "error": "Reminder not found." }`
-- unexpected non-Error failures return `500 { "error": "Internal server error" }`
+- any other thrown `Error` also returns `400` with its raw message; `500 { "error": "Internal server error" }` is returned only for a non-Error throw (known issue — `docs/code-bugs.md` CB-01)
 
 ### DELETE /api/reminders/:id
 
@@ -352,7 +361,7 @@ Response `200`:
 Errors:
 
 - `400 { "error": "Reminder not found." }`
-- unexpected non-Error failures return `500 { "error": "Internal server error" }`
+- any other thrown `Error` also returns `400` with its raw message; `500 { "error": "Internal server error" }` is returned only for a non-Error throw (known issue — `docs/code-bugs.md` CB-01)
 
 ---
 
@@ -400,7 +409,12 @@ frontend/app/(protected)/applications/page.tsx
 
 ### Purpose and content
 
-The list is a six-column status board. It preserves the backend's descending `dateApplied` order within each status column and shows a count chip, stale-applications banner, per-status summary strip, and cards with company name, job title, source, formatted date, color-coded status, and a stale-age badge when applicable.
+The list is a six-column status board. It preserves the backend's descending `dateApplied` order within each status column and shows a count chip, stale-applications chip, per-status summary strip, and cards with company name, job title, source, formatted date, and a color-coded left edge shown on hover. Cards are click-only: there is no drag-and-drop between columns, and status changes happen on the detail page.
+
+Two different "stale" measures appear on this page (known issue — see `docs/code-bugs.md` CB-04):
+
+- **Header chip:** `{n} stale — no update in 14+ days`, or `All caught up — no stale applications` when the count is zero. The count includes only applications whose status is `APPLIED` and whose `dateApplied` is 14 or more days ago. Despite the "no update" wording, it does not look at status history.
+- **Card badge:** a small `{n}d` badge on a card when 14 or more days have passed since its most recent status change (the newest `statusHistory` entry, or `updatedAt` when there is no history). It applies to a card in any status, including `OFFER` and `REJECTED`.
 
 Status color mapping:
 
@@ -459,9 +473,11 @@ The page creates one application and then routes directly to its detail page.
 | `companyDomain` | set by picking a suggestion; no visible input | No | `""` |
 | `jobTitle` | text | Yes | `""` |
 | `source` | select | Yes | `LINKED_IN` |
-| `dateApplied` | date | No | current date |
+| `dateApplied` | date | No | today's date in UTC (`new Date().toISOString().split("T")[0]`) |
 | `jobDescription` | textarea | No | `""` |
 | `notes` | textarea | No | `""` |
+
+The initial date uses the UTC calendar date, so between 00:00 and 05:30 IST the pre-filled date is the previous day in India. The user can change it before saving.
 
 The source select contains the six exact `ApplicationSource` values from the source-label table.
 
@@ -518,7 +534,7 @@ The page is organized into three tabs:
 - `ai`: saved resume analysis and reanalysis controls.
 - `reminder`: reminder creation and reminder guidance.
 
-The header remains sticky and includes back navigation, the company logo and name, job title, current status badge, and overflow actions.
+The header remains sticky and includes back navigation, the company logo and name, job title, current status badge, and a three-dot overflow menu. The menu has two items: `Edit details`, which is disabled and marked `Soon` (tooltip `Coming soon`), and `Delete`, which opens the delete confirmation. There is no way to edit an application's company, title, source, or job description from the UI yet, although `PUT /api/applications/:id` accepts them.
 
 The company card on the overview tab uses `CompanyLogo` (44px) in place of the old first-letter box. Applications without a domain show a grey letter avatar.
 
@@ -637,7 +653,8 @@ When saved analysis exists:
 The `Copy improvement prompt` action builds a prompt from the current application and saved analysis:
 
 ```ts
-I applied for a ${application.jobTitle} role at ${application.companyName}.
+I applied for a ${application.jobTitle} role at ${application.companyName}. My resume was analysed and here is what came back:
+
 Match Score: ${savedAnalysis.matchScore}/100
 Missing Keywords: ${savedAnalysis.missingKeywords.join(", ")}
 Red Flags: ${savedAnalysis.redFlags.join(", ")}
@@ -654,8 +671,10 @@ It writes to `navigator.clipboard`, sets `copied` to true, then resets that feed
 | Condition | UI behavior |
 |---|---|
 | No job description | `Add a job description to this application first.`; no API call |
-| Backend resume error | `No resume uploaded. Upload one from your profile page.` |
-| Other API error | Render the API error message verbatim |
+| Any error message that contains the word "resume" (case-insensitive) | `No resume uploaded. Upload one from your profile page.` |
+| Any other error | Render the API error message verbatim |
+
+The "resume" check is a substring match on the error message, so it covers `Resume not found. Please upload your resume first.` and would also match any other backend message that mentions a resume.
 
 ### Type definition
 
@@ -684,7 +703,7 @@ export interface ResumeAnalysis {
 
 The user picks a date and optional note, then clicks `Set reminder`. `POST /api/reminders` stores the record with `isSent: false`.
 
-A daily 9am cron job finds unsent reminders whose `reminderDate` is today in UTC, sends an HTML email through Resend from `reminders@applyntrack.online`, then marks each record `isSent: true` so it cannot be sent twice.
+A daily 9am cron job finds unsent reminders whose `reminderDate` is today in UTC, sends an HTML email through Resend, then marks each record `isSent: true` so it cannot be sent twice. The sender address is the value of the `RESEND_FROM_EMAIL` environment variable; the code does not hardcode an address.
 
 ### UI fields and states
 
@@ -712,11 +731,15 @@ await createReminder.mutateAsync({
 })
 ```
 
-The detail-page UI currently creates reminders only. The backend exposes update and delete reminder endpoints, but the page has no reminder list endpoint to support full management yet.
+The detail-page UI currently creates reminders only. The backend exposes update and delete reminder endpoints, but the page has no reminder list endpoint to support full management yet. The client helpers `updateReminder` and `deleteReminder` in `frontend/app/lib/api.ts`, and the `Reminder` type in `frontend/app/types/index.ts`, are defined but not used by any component (see `docs/code-bugs.md` CB-13).
+
+### How reminders work card
+
+The reminder tab shows a `How reminders work` card with four bullets. The last bullet reads `You can update or delete a reminder any time before it fires.` That statement is not true of the UI: no control updates or deletes a reminder. Known issue — see `docs/code-bugs.md` CB-08.
 
 ### Upcoming reminders placeholder
 
-The reminder tab shows an `Upcoming reminders` card, but it is a static empty placeholder because there is no list-reminders endpoint currently.
+The reminder tab shows an `Upcoming reminders` card, but it is a static empty placeholder (`No reminders set for this application`) because there is no list-reminders endpoint currently. It shows this text even when the application has reminders.
 
 ### Important: UTC date handling
 
@@ -726,13 +749,13 @@ In practice: when setting a same-day reminder late at night IST, use the next ca
 
 ### Email and cron
 
-The email contains the user's first name, job title, company name, and reminder notes when provided. The cron expression is:
+The email subject is `Reminder — {jobTitle} at {companyName}`. The body greets the user with their full stored `name` (`Hi {name},`, not just the first name) and shows the job title, company name, and the reminder note when one was provided. These values are inserted into the HTML without escaping (known issue — `docs/code-bugs.md` CB-09). The cron expression is:
 
 ```text
 0 9 * * *
 ```
 
-It is configured in `backend/src/jobs/reminderJob.ts` and started by `startReminderJob()` in `index.ts` after `app.listen`. Its date query uses `setUTCHours` and `setUTCDate` explicitly.
+It is configured in `backend/src/jobs/reminderJob.ts` and started by `startReminderJob()` in `index.ts` after `app.listen`. No timezone option is set, so 9am means the server's local time. Its date query uses `setUTCHours` and `setUTCDate` explicitly, so the range it matches is a UTC calendar day. The callback has no outer `try/catch`; only each individual send is wrapped (see `docs/code-bugs.md` CB-01).
 
 ---
 
@@ -744,7 +767,11 @@ It is configured in `backend/src/jobs/reminderJob.ts` and started by `startRemin
 - The upcoming reminders card is currently a placeholder.
 - UTC/IST mismatch can cause same-day reminders set late at night to be missed.
 - If the backend server is down at 9am, that day's reminders are missed because there is no retry mechanism.
-- `suggestions` is part of the `ResumeAnalysis` type but currently returns an empty array.
+- `suggestions` is part of the `ResumeAnalysis` type but is always empty. `POST /api/ai/analyze-resume` returns `[]` and `GET /api/ai/resume-analysis/:appId` returns the string `"[]"` (CB-07).
+- The list page's header chip, its card badge, the dashboard, and the backend stat each define "stale" differently (CB-04).
+- `PUT /api/reminders/:id` does not reset `isSent` (CB-10), and the Reminder tab text promises update and delete controls that do not exist (CB-08).
+- The pre-filled `dateApplied` on the create page is the UTC date, which is the previous day in India between 00:00 and 05:30 IST.
+- The overflow menu's `Edit details` item is disabled. Company, title, source, and job description cannot be edited in the UI.
 - Resume upload replaces every cached saved analysis with `null`; the detail page reflects that cache update without needing a refresh.
 - Applications created before `companyDomain` existed have no domain and show letter avatars. There is no UI to add or edit a domain on an existing application.
 - The update endpoint ignores an empty `companyDomain`, so a stored domain cannot be cleared through the API.

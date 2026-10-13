@@ -1,9 +1,9 @@
 # ApplynTrack: Before Beta Checklist
 
-**Last updated:** October 11, 2026
+**Last updated:** October 2026
 **Readiness estimate:** ~70/100 for a small closed beta (10 to 30 users), ~50/100 for a public launch
 **Target before inviting anyone:** 85/100, which means every **P0** item below is done and verified
-**Basis:** this estimate comes from the project docs (PRD, architecture, module specs), not from reading the backend code. Items marked **(verify)** need a check in the actual code.
+**Basis:** the estimate was first made from the project docs. The docs were later checked against the code, and the issues found are listed in `docs/code-bugs.md` (CB-xx). Checklist items below link to the matching entry where one exists. Items marked **(verify)** still need a check in the actual code or in the deployed environment.
 
 **Priority legend**
 - **P0:** blocker. Do not invite real users until it is done.
@@ -14,7 +14,7 @@
 
 ## 0. Pre-requisite: finish the current work
 
-- [ ] Merge the TanStack Query branch (`feat/tanstack-query`) after `npx tsc --noEmit`, `npm run lint` and `npm run build` pass
+- [ ] Merge the TanStack Query branch (`feat/tanstack-query-caching`) after `npx tsc --noEmit`, `npm run lint` and `npm run build` pass
 - [ ] Manually verify the 7 checks from the Codex prompt using `npm run build && npm run start` (not dev mode)
 - [ ] Check every page's first-load skeleton for layout jumps and tweak where needed
 
@@ -23,18 +23,18 @@
 ## 1. Fix before beta (the ~30% gap)
 
 ### 1.1 Global error handler and crash protection (P0, ~2 hrs)
-**Why:** each controller has its own try/catch and there is no central handler, so an error outside a try/catch can crash the server and take every user down.
+**Why:** each controller has its own try/catch and there is no central handler, so an error outside a try/catch can crash the server and take every user down. See `docs/code-bugs.md` CB-01. The cron callback in `reminderJob.ts` has no outer try/catch (only the per-reminder send is wrapped), so a failing initial query is an unhandled rejection. Status codes also differ by module: AI and reminders return `400` with the raw message for any `Error`, applications return `500` with the raw message.
 
 - [ ] Add an Express error-handling middleware at the end of `index.ts`, after all routes: `app.use((err, req, res, next) => { ... })`
 - [ ] Return a consistent JSON shape: `{ "error": "Internal server error" }` with the right status code, and never leak stack traces in production
 - [ ] Log the error server-side with context (route, userId, not resume text)
 - [ ] Add `process.on("unhandledRejection")` and `process.on("uncaughtException")` handlers that log
-- [ ] Wrap the body of the cron job callback in try/catch so one failed email can't kill the job or the process
+- [ ] Wrap the body of the cron job callback in try/catch. Each reminder send already has its own try/catch, but the initial query does not
 - [ ] Add a 404 handler for unknown routes
 - [ ] Confirm Railway's restart policy restarts the service on crash
 
 ### 1.2 Input validation with Zod (P0, ~3 to 4 hrs)
-**Why:** no request-body validation exists. Invalid enum values or missing fields reach Prisma and produce unhelpful errors.
+**Why:** no request-body validation exists. Invalid enum values or missing fields reach Prisma and produce unhelpful errors (CB-01).
 
 - [ ] Add `zod` to the backend
 - [ ] Create a small `validate(schema)` middleware that returns `400` with a readable message
@@ -48,7 +48,7 @@
 - [ ] Add multer limits on resume upload (see 1.5)
 
 ### 1.3 Production configuration (P0, ~2 to 3 hrs)
-**Why:** the frontend currently falls back to `http://localhost:5000` and `next.config.ts` contains a localhost rewrite. In production this can silently point users at the wrong place or fail.
+**Why:** the frontend currently falls back to `http://localhost:5000` (`api.ts:2`) and `next.config.ts:9` contains a localhost rewrite. In production this can silently point users at the wrong place or fail (CB-05).
 
 - [ ] Set `NEXT_PUBLIC_API_URL` in Vercel to the Railway backend URL
 - [ ] Remove the `localhost` fallback in `frontend/app/lib/api.ts`, or make it throw in production so a missing variable fails loudly
@@ -56,7 +56,9 @@
 - [ ] Set backend `CLIENT_URL` to the deployed frontend URL and make sure CORS allows only that origin
 - [ ] **Clerk:** create the Production instance, add production keys to Vercel and Railway, and set up your own Google OAuth credentials for production (dev keys will not work for real users)
 - [ ] Add your production domain to Clerk's allowed origins and redirect URLs
-- [ ] `.gitignore` must cover `.env*`, `dist`, `node_modules`, and generated Prisma files; run `git ls-files | grep -i env` to confirm no env file is tracked
+- [ ] Fix the ignore files and untrack generated output (CB-03). `backend/dist/` (22 files) and `backend/src/generated/prisma/` (20 files) are tracked. `backend/.gitignore` lists `/generated/prisma`, which does not match `src/generated/prisma`, and does not list `dist`. The root `.gitignore` has no `.env*`, `node_modules` or `dist` rule. Untrack with `git rm -r --cached` (keep the files on disk). A check on this repo found no tracked env file; re-run `git ls-files | grep -i env` to confirm
+- [ ] Remove unused backend dependencies (`axios`, `jsonwebtoken`, `@types/jsonwebtoken`, `@types/pdf-parse`) and move or remove the personal ngrok host in `next.config.ts` `allowedDevOrigins` (CB-11)
+- [ ] Cleanup (P2): remove or fix the comments that cite the missing `docs/context.md` (CB-12), the unused `updateReminder` / `deleteReminder` / `Reminder` type (CB-13) unless a reminders management UI is built, the unreachable 404 branch in `getProfileController` (CB-14), and decide what to do with the placeholder home page and the `/sign-up` public route that has no page (CB-15)
 - [ ] If any secret was ever committed, rotate it (Gemini, Resend, Supabase service role, Clerk)
 - [ ] Use `npx prisma migrate deploy` in the Railway deploy step (not `migrate dev`)
 - [ ] Use the pooled `DATABASE_URL` for the app and `DIRECT_URL` for migrations (Supabase)
@@ -70,7 +72,9 @@
 - [ ] Pin the schedule timezone: `cron.schedule("0 9 * * *", job, { timezone: "Asia/Kolkata" })`
 - [ ] Decide on and document the date semantics. Reminder dates are stored as UTC midnight of the picked date, and the job queries by UTC date range
 - [ ] Add catch-up: also send reminders where `reminderDate <= today (UTC)` and `isSent = false`, so a missed 9 AM (server down or restarting) is still sent later
-- [ ] Mark `isSent` per reminder right after a successful send, and keep one failed email from blocking the rest
+- [ ] Mark `isSent` per reminder right after a successful send, and keep one failed email from blocking the rest (the per-send try/catch already exists; **verify** the `isSent` update timing)
+- [ ] Decide whether `PUT /api/reminders/:id` should reset `isSent` when the date changes (CB-10). Today a sent reminder that is rescheduled never fires again
+- [ ] Escape the user-supplied text in the reminder email HTML (CB-09)
 - [ ] Run a single backend instance. Two replicas would run the cron twice and send duplicate emails (or add a lock first)
 - [ ] Add a plain-text fallback to the Resend email (currently HTML only)
 - [ ] Test end to end: create a reminder for today and trigger the job manually, then confirm the email arrives and `isSent` flips
@@ -83,7 +87,7 @@
 - [ ] Store the storage path (`{userId}/resume.pdf`), not a permanent public URL
 - [ ] Generate short-lived signed URLs (`createSignedUrl`) when the user clicks "View current resume"
 - [ ] Update the frontend "View current resume" link to fetch a signed URL on demand
-- [ ] Add multer `limits: { fileSize: 5 * 1024 * 1024 }` (5 MB) and a clear error message
+- [ ] Add multer `limits: { fileSize: 5 * 1024 * 1024 }` (5 MB) and a clear error message, and handle multer errors so they return `{ "error": ... }` (CB-02). Today multer has no limits and its errors are not caught by the controller
 - [ ] Validate the PDF server-side (check the `application/pdf` mimetype and the `%PDF` magic bytes), not just the client-side check
 - [ ] Reject or clearly flag a resume that extracts **empty text** (scanned or image-only PDFs), with a message like "We couldn't read text from this PDF"
 - [ ] Do not log resume text or full user objects anywhere
@@ -119,7 +123,7 @@
 - [ ] **Data isolation test:** log in as user A, then try to read, update and delete user B's application, reminder and analysis by ID. Every attempt must return 404. Verify that **every** Prisma query is scoped by `req.user.id` **(verify)**
 - [ ] Add `helmet` to the Express app
 - [ ] CORS locked to the production frontend origin only
-- [ ] Run `npm audit` on both projects and fix high and critical issues
+- [ ] Run `npm audit` on both projects and fix high and critical issues. Remove the unused dependencies first (CB-11)
 - [ ] The Clerk secret key and service role key exist only in server environments
 - [ ] No `console.log` of tokens, resume text or emails in production code
 - [ ] Confirm `requireUser` protects every route except `/health` and `/api/user/sync`
@@ -151,7 +155,10 @@
 - [ ] **Onboarding:** first-time users need a nudge to set target role and **upload a resume** (AI analysis is useless without it). Add a short checklist or banner on the dashboard
 - [ ] **Error and not-found pages:** add `not-found.tsx` and `error.tsx` for friendly failures
 - [ ] **Session expiry:** make sure an expired Clerk session redirects to sign-in instead of showing a broken page
-- [ ] **PRD vs reality:** the PRD promised a Kanban board with drag-and-drop and source analytics. The built list view and simplified dashboard differ. Decide whether those are deferred on purpose, and update the PRD or build them
+- [ ] **PRD vs reality:** the PRD promised a Kanban board with drag-and-drop and source analytics. The built board has status columns but no drag-and-drop, and the dashboard is simplified. `prd.md` now marks these as planned or differing. Decide whether they are deferred on purpose, or build them
+- [ ] **Stale definition:** pick one definition of "stale application" and use it in the backend, dashboard, Applications header chip and card badge (CB-04)
+- [ ] **Sidebar target role:** show the profile `targetRole` in the sidebar instead of Clerk `publicMetadata` (CB-06)
+- [ ] **Reminder tab text:** change "You can update or delete a reminder any time before it fires" or build the controls (CB-08)
 - [ ] **Feedback channel:** add an in-app "Send feedback" link (a Google Form is enough) so beta users can report issues
 - [ ] Meaningful page titles, favicon and basic meta tags
 
@@ -253,7 +260,7 @@
 - [ ] Analytics page: response rate, rejection rate and best source (moved out of the dashboard on purpose)
 - [ ] Fix the enum spellings (`NAUKARI`, `REFERAL`, `COLDEMAIL`) with an explicit `ALTER TYPE ... RENAME VALUE` migration, and update the frontend payloads together
 - [ ] Clean the resume text before sending it to Gemini (strip PDF layout artifacts)
-- [ ] Fill the `suggestions` field in resume analysis
+- [ ] Fill the `suggestions` field in resume analysis, and make `GET /api/ai/resume-analysis/:appId` return it as an array (CB-07)
 - [ ] Move reminders to an external scheduler if you scale beyond one instance
 - [ ] Server-side pagination and search
 - [ ] CSV export of applications
