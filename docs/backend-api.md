@@ -54,6 +54,24 @@ If the token is missing or invalid the backend returns:
 
 with status 401.
 
+### Global error responses
+
+Every endpoint can also return one of these shared error shapes. The body is always `{ "error": "<message>" }`:
+
+| Status | Message | When |
+|---|---|---|
+| 400 | `Invalid JSON in request body` | Request body is not valid JSON. |
+| 400 | `Invalid request data` | Prisma rejected an input (bad enum, bad date, wrong type, foreign key failure). |
+| 400 | `Invalid file upload` | A multer error other than file-size. |
+| 404 | `Route not found` | Unknown route. |
+| 404 | `Resource not found` | Prisma `P2025` (record not found). |
+| 409 | `Resource already exists` | Prisma `P2002` (unique constraint). |
+| 413 | `File is too large. Maximum size is 5 MB.` | Resume upload exceeded the size limit. |
+| 500 | `Internal server error` | Any unhandled error. Internal details (Prisma, Gemini, stack traces) are not exposed. |
+| 503 | `AI analysis is temporarily unavailable. Please try again in a moment.` | Gemini call, JSON parse, or shape validation failed on an AI endpoint. |
+
+Every response also includes an `X-Request-Id` header that correlates with backend logs.
+
 For all protected routes except `/api/user/sync`, the backend also requires a matching local database user. If the Clerk user exists but has not been synced locally, the backend returns:
 
 ```json
@@ -381,6 +399,20 @@ Response 400:
 { "error": "Only PDF files are allowed" }
 ```
 
+```json
+{ "error": "Could not read this PDF. Please upload a different file." }
+```
+
+```json
+{ "error": "No readable text found in this PDF. Please upload a text-based PDF, not a scanned image." }
+```
+
+Response 413:
+
+```json
+{ "error": "File is too large. Maximum size is 5 MB." }
+```
+
 Response 500:
 
 ```json
@@ -391,14 +423,12 @@ Response 500:
 { "error": "Internal server error" }
 ```
 
-The last response also covers a PDF that `pdf2json` cannot parse.
+Notes:
 
-Known limits of this endpoint (see `docs/code-bugs.md` CB-02):
-
-- There is no file-size limit. `multer` uses memory storage with no `limits`.
-- The PDF check uses only the client-declared mimetype.
-- A `multer` error (for example an unexpected form field name) is not caught by the controller. The exact response was not verified; do not assume it has the `{ "error": ... }` shape.
-- A PDF with no extractable text is accepted and stored with empty `resumeText`.
+- The upload has a 5 MB size limit enforced by `multer`.
+- The PDF check uses the client-declared mimetype.
+- If `pdf2json` cannot parse the file, the response is `400 { "error": "Could not read this PDF. Please upload a different file." }`.
+- If the extracted text is empty or whitespace only (for example a scanned image PDF), the response is `400 { "error": "No readable text found in this PDF. Please upload a text-based PDF, not a scanned image." }` and the file is not uploaded to storage.
 
 ---
 
@@ -641,7 +671,7 @@ Deleting an application also cascades related `ResumeAnalysis` and `Reminder` ro
 
 ### Applications module error responses
 
-Every Applications endpoint returns `500` for an unexpected failure. The body is `{ "error": <raw error message> }`, which can be a Prisma or database message, or `"Internal server error"` when a non-`Error` value is thrown. Single-application endpoints return `404 { "error": "Application not found" }` when the application does not exist or belongs to another user. There is no request-body validation: an invalid `status` or `source` value surfaces as a `500` with the Prisma message. See `docs/code-bugs.md` CB-01.
+Single-application endpoints return `404 { "error": "Application not found" }` when the application does not exist or belongs to another user. An invalid `status`, `source`, or `dateApplied` value is mapped to `400 { "error": "Invalid request data" }` by the global error handler. Any unexpected failure is `500 { "error": "Internal server error" }`; raw Prisma or database messages are never returned to the client.
 
 ---
 
@@ -711,14 +741,22 @@ Response 400:
 ```
 
 ```json
-{ "error": "Application not found." }
-```
-
-```json
 { "error": "No job description found for this application." }
 ```
 
-Any other `Error` thrown while analysing (for example a Gemini or database failure) is also returned as `400` with the raw error message. `500 { "error": "Internal server error" }` is returned only when a non-`Error` value is thrown. Known issue — see `docs/code-bugs.md` CB-01.
+Response 404:
+
+```json
+{ "error": "Application not found." }
+```
+
+Response 503:
+
+```json
+{ "error": "AI analysis is temporarily unavailable. Please try again in a moment." }
+```
+
+Returned when the Gemini call fails (network, 401/403 bad API key, 429/503 overload) or its response cannot be parsed or does not match the expected shape. The original Gemini error is logged, never returned to the client.
 
 ---
 
@@ -754,7 +792,7 @@ Response 200 when analysis exists:
 }
 ```
 
-`suggestions` is the string `"[]"`, not an array, in this response. The POST response returns `[]`. The frontend does not read the field. Known issue — see `docs/code-bugs.md` CB-07.
+`suggestions` is returned as an array (parsed from the stored JSON string). The frontend does not read the field.
 
 Response 200 when no saved analysis exists:
 
@@ -762,13 +800,11 @@ Response 200 when no saved analysis exists:
 { "analysis": null }
 ```
 
-Response 400:
+Response 404:
 
 ```json
 { "error": "Application not found." }
 ```
-
-As with the POST endpoint, any other `Error` is returned as `400` with its raw message (CB-01).
 
 Important frontend behavior:
 
@@ -781,8 +817,6 @@ Important frontend behavior:
 ## Reminders Module
 
 There is no list reminders endpoint currently. Reminders can be created, updated, and deleted.
-
-Error handling for all three reminder endpoints: any `Error` thrown by the service (including database failures) is returned as `400` with the raw message. `500 { "error": "Internal server error" }` is returned only when a non-`Error` value is thrown. See `docs/code-bugs.md` CB-01.
 
 ---
 
@@ -828,6 +862,8 @@ Response 400:
 ```json
 { "error": "applicationId and reminderDate are required" }
 ```
+
+Response 404:
 
 ```json
 { "error": "Application not found." }
@@ -879,6 +915,8 @@ Response 400:
 { "error": "reminderDate is required" }
 ```
 
+Response 404:
+
 ```json
 { "error": "Reminder not found." }
 ```
@@ -897,7 +935,7 @@ Response 200:
 { "message": "Reminder deleted successfully" }
 ```
 
-Response 400:
+Response 404:
 
 ```json
 { "error": "Reminder not found." }
@@ -949,7 +987,7 @@ Field notes:
 - `rejectionRate` is the percentage of applications with `REJECTED` status.
 - `bestSource` is the `ApplicationSource` enum value with the most non-`APPLIED` applications, or `null` if there are no responses.
 - `staleApplications` counts applications with status `APPLIED` whose `dateApplied` is earlier than the current time minus 14 days (server local time, strict `<`). The frontend does not use this field; the dashboard computes its own count. The product has five different "stale" definitions — see `docs/code-bugs.md` CB-04.
-- `GET /api/dashboard/stats` returns `500 { "error": "Internal server error" }` on an unexpected failure.
+- Unexpected failures are mapped by the global error handler (see the top of this document).
 - Rates are rounded integers from 0 to 100.
 
 ---
@@ -958,13 +996,11 @@ Field notes:
 
 The following items are intentionally deferred until after the functional frontend is complete. Do not implement these during frontend development unless the backend task explicitly asks for them.
 
-- Global error handler middleware. Every controller handles errors with its own try/catch block and the status codes differ by module (CB-01).
 - Input validation with Zod or a similar validator. Request body validation is currently manual and incomplete (CB-01).
-- Resume upload limits. No file-size limit, and multer errors are not handled (CB-02).
 - `.gitignore` cleanup. `backend/dist` and `backend/src/generated/prisma` are tracked in git, and the backend ignore file lists the wrong Prisma path (CB-03).
 - Unused backend dependencies (CB-11).
 - Automated tests. No backend test suite exists yet (CB-01).
-- Reminder delivery hardening. The reminder job exists, but this document only covers CRUD endpoints; known reminder issues are CB-09 and CB-10.
+- Reminder content hardening. HTML user text is not escaped (CB-09) and `PUT /api/reminders/:id` does not reset `isSent` (CB-10).
 
 All items are tracked in `docs/code-bugs.md`.
 

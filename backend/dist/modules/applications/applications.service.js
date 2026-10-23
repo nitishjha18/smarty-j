@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteApplication = exports.updateApplication = exports.getApplicationById = exports.getAllApplications = exports.createApplication = void 0;
 const client_1 = require("@prisma/client");
 const db_1 = __importDefault(require("../../config/db"));
+const AppError_1 = require("../../utils/AppError");
 const createApplication = async (userId, data) => {
     const now = new Date();
     return db_1.default.$transaction(async (tx) => {
@@ -13,6 +14,7 @@ const createApplication = async (userId, data) => {
             data: {
                 userId,
                 companyName: data.companyName,
+                companyDomain: data.companyDomain,
                 jobTitle: data.jobTitle,
                 jobDescription: data.jobDescription ?? "",
                 source: data.source,
@@ -57,7 +59,7 @@ const getApplicationById = async (userId, applicationId) => {
         },
     });
     if (!application) {
-        throw new Error("Application not found");
+        throw (0, AppError_1.notFound)("Application not found");
     }
     return application;
 };
@@ -70,13 +72,15 @@ const updateApplication = async (userId, applicationId, data) => {
         },
     });
     if (!existing) {
-        throw new Error("Application not found");
+        throw (0, AppError_1.notFound)("Application not found");
     }
     const shouldCreateStatusHistory = data.status !== undefined && data.status !== existing.status;
     return db_1.default.$transaction(async (tx) => {
         const updateData = {};
         if (data.companyName !== undefined)
             updateData.companyName = data.companyName;
+        if (data.companyDomain !== undefined)
+            updateData.companyDomain = data.companyDomain;
         if (data.jobTitle !== undefined)
             updateData.jobTitle = data.jobTitle;
         if (data.jobDescription !== undefined)
@@ -97,7 +101,7 @@ const updateApplication = async (userId, applicationId, data) => {
             data: updateData,
         });
         if (updateResult.count === 0) {
-            throw new Error("Application not found");
+            throw (0, AppError_1.notFound)("Application not found");
         }
         if (shouldCreateStatusHistory && data.status) {
             await tx.statusHistory.create({
@@ -120,7 +124,7 @@ const updateApplication = async (userId, applicationId, data) => {
             },
         });
         if (!updatedApplication) {
-            throw new Error("Application not found");
+            throw (0, AppError_1.notFound)("Application not found");
         }
         return updatedApplication;
     });
@@ -134,7 +138,7 @@ const deleteApplication = async (userId, applicationId) => {
         },
     });
     if (!existing) {
-        throw new Error("Application not found");
+        throw (0, AppError_1.notFound)("Application not found");
     }
     await db_1.default.$transaction(async (tx) => {
         await tx.statusHistory.deleteMany({
@@ -152,7 +156,7 @@ const deleteApplication = async (userId, applicationId) => {
             },
         });
         if (deleteResult.count === 0) {
-            throw new Error("Application not found");
+            throw (0, AppError_1.notFound)("Application not found");
         }
     });
     return { message: "Application deleted successfully" };

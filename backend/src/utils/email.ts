@@ -1,4 +1,5 @@
 import { Resend } from "resend"
+import { logger } from "../config/logger"
 
 const resend = new Resend(process.env.RESEND_API_KEY!)
 
@@ -35,7 +36,7 @@ export const sendReminderEmail = async (
   })
 
   if (error) {
-    console.error("Email send error:", error)
+    logger.error({ err: error }, "Email send error")
     throw new Error("Failed to send email")
   }
 

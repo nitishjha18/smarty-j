@@ -6,7 +6,5 @@ const ai_controller_1 = require("./ai.controller");
 const router = (0, express_1.Router)();
 router.use(auth_1.requireUser);
 router.post("/analyze-resume", ai_controller_1.analyzeResumeController);
-router.post("/interview-prep", ai_controller_1.interviewPrepController);
-router.post("/save-answers", ai_controller_1.saveAnswersController);
-router.get("/answers/:appId", ai_controller_1.getAnswersController);
+router.get("/resume-analysis/:appId", ai_controller_1.getResumeAnalysisController);
 exports.default = router;

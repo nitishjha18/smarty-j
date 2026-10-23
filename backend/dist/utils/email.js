@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendReminderEmail = void 0;
 const resend_1 = require("resend");
+const logger_1 = require("../config/logger");
 const resend = new resend_1.Resend(process.env.RESEND_API_KEY);
 const sendReminderEmail = async (toEmail, userName, companyName, jobTitle, notes) => {
     const { data, error } = await resend.emails.send({
@@ -29,7 +30,7 @@ const sendReminderEmail = async (toEmail, userName, companyName, jobTitle, notes
     `
     });
     if (error) {
-        console.error("Email send error:", error);
+        logger_1.logger.error({ err: error }, "Email send error");
         throw new Error("Failed to send email");
     }
     return data;

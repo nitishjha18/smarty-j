@@ -55,6 +55,7 @@ SUPABASE_SERVICE_ROLE_KEY
 GEMINI_API_KEY
 RESEND_API_KEY
 RESEND_FROM_EMAIL
+LOG_LEVEL
 ```
 
 ### Frontend — `frontend/.env.local`
@@ -65,6 +66,8 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 CLERK_SECRET_KEY
 NEXT_PUBLIC_BRANDFETCH_CLIENT_ID
 ```
+
+`LOG_LEVEL` controls the Pino log level on the backend (`trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent`). Defaults to `info` when unset. Set `NODE_ENV=production` to switch Pino from pretty-printed output to plain JSON.
 
 `CLERK_SECRET_KEY` is read by Clerk in the Next.js `middleware.ts`, which protects every route except `/`, `/sign-in` and `/sign-up`. `NEXT_PUBLIC_API_URL` falls back to `http://localhost:5000` when it is not set, so a missing value fails silently in a deployment (known issue — see CB-05 in `docs/code-bugs.md`). The optional `NEXT_PUBLIC_CLERK_SIGN_IN_URL`, `NEXT_PUBLIC_CLERK_SIGN_UP_URL`, `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` and `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` variables are read by Clerk and are not referenced in the app code.
 

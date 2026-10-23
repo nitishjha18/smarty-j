@@ -29,6 +29,15 @@ const getUserByClerkId = async (clerkId) => {
 };
 exports.getUserByClerkId = getUserByClerkId;
 const updateResumeUrl = async (userId, resumeUrl, resumeText) => {
+    // Delete all saved resume analyses for this user's applications
+    // so they get fresh analysis against the new resume
+    await db_1.default.resumeAnalysis.deleteMany({
+        where: {
+            application: {
+                userId
+            }
+        }
+    });
     return db_1.default.user.update({
         where: { id: userId },
         data: { resumeUrl, resumeText },

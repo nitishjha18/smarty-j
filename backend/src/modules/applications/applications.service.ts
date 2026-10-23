@@ -4,6 +4,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import prisma from "../../config/db";
+import { notFound } from "../../utils/AppError";
 
 type CreateApplicationInput = {
   companyName: string;
@@ -88,7 +89,7 @@ export const getApplicationById = async (
   });
 
   if (!application) {
-    throw new Error("Application not found");
+    throw notFound("Application not found");
   }
 
   return application;
@@ -107,7 +108,7 @@ export const updateApplication = async (
   });
 
   if (!existing) {
-    throw new Error("Application not found");
+    throw notFound("Application not found");
   }
 
   const shouldCreateStatusHistory =
@@ -136,7 +137,7 @@ export const updateApplication = async (
     });
 
     if (updateResult.count === 0) {
-      throw new Error("Application not found");
+      throw notFound("Application not found");
     }
 
     if (shouldCreateStatusHistory && data.status) {
@@ -162,7 +163,7 @@ export const updateApplication = async (
     });
 
     if (!updatedApplication) {
-      throw new Error("Application not found");
+      throw notFound("Application not found");
     }
 
     return updatedApplication;
@@ -178,7 +179,7 @@ export const deleteApplication = async (userId: string, applicationId: string) =
   });
 
   if (!existing) {
-    throw new Error("Application not found");
+    throw notFound("Application not found");
   }
 
   await prisma.$transaction(async (tx) => {
@@ -199,7 +200,7 @@ export const deleteApplication = async (userId: string, applicationId: string) =
     });
 
     if (deleteResult.count === 0) {
-      throw new Error("Application not found");
+      throw notFound("Application not found");
     }
   });
 
