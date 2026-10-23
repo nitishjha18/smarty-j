@@ -1,7 +1,8 @@
 import { geminiModel } from "../../config/gemini"
 import prisma from "../../config/db"
+import { logger } from "../../config/logger"
+import { AppError, badRequest, notFound, serviceUnavailable } from "../../utils/AppError"
 
-// --- Keyword extraction algorithm ---
 const STOP_WORDS = new Set([
   "the", "and", "with", "you", "will", "for", "are", "this",
   "that", "have", "from", "they", "your", "which", "when",
@@ -34,17 +35,70 @@ const getMissingKeywords = (
 
   return jdKeywords
     .filter(keyword => !resumeLower.includes(keyword))
-    .slice(0, 10) // cap at 10 missing keywords
+    .slice(0, 10)
 }
 
-// --- Resume Analysis ---
+const AI_UNAVAILABLE_MESSAGE =
+  "AI analysis is temporarily unavailable. Please try again in a moment."
+
+const isConfigError = (err: unknown): boolean => {
+  const anyErr = err as any
+  const status = anyErr?.status ?? anyErr?.statusCode ?? anyErr?.response?.status
+  if (status === 401 || status === 403) return true
+  const msg = String(anyErr?.message || "").toLowerCase()
+  return (
+    msg.includes("api key") ||
+    msg.includes("api_key") ||
+    msg.includes("permission denied")
+  )
+}
+
+const callGemini = async (prompt: string): Promise<any> => {
+  let text: string
+  try {
+    const result = await geminiModel.generateContent(prompt)
+    text = result.response.text()
+  } catch (err) {
+    if (isConfigError(err)) {
+      logger.error(
+        { err },
+        "Gemini API key is missing, invalid, or lacks permission — check GEMINI_API_KEY configuration"
+      )
+    } else {
+      logger.error({ err }, "Gemini request failed")
+    }
+    throw serviceUnavailable(AI_UNAVAILABLE_MESSAGE)
+  }
+
+  const clean = text.replace(/```json|```/g, "").trim()
+  let parsed: any
+  try {
+    parsed = JSON.parse(clean)
+  } catch (err) {
+    logger.error({ err, raw: text }, "Gemini returned invalid JSON")
+    throw serviceUnavailable(AI_UNAVAILABLE_MESSAGE)
+  }
+
+  if (
+    typeof parsed?.matchScore !== "number" ||
+    !Array.isArray(parsed?.strongestPoints) ||
+    !Array.isArray(parsed?.redFlags) ||
+    typeof parsed?.recruiterTake !== "string"
+  ) {
+    logger.error({ parsed }, "Gemini response missing expected fields")
+    throw serviceUnavailable(AI_UNAVAILABLE_MESSAGE)
+  }
+
+  return parsed
+}
+
 export const analyzeResume = async (userId: string, applicationId: string) => {
   const user = await prisma.user.findUnique({
     where: { id: userId }
   })
 
   if (!user?.resumeText) {
-    throw new Error("Resume not found. Please upload your resume first.")
+    throw badRequest("Resume not found. Please upload your resume first.")
   }
 
   const application = await prisma.application.findFirst({
@@ -52,20 +106,18 @@ export const analyzeResume = async (userId: string, applicationId: string) => {
   })
 
   if (!application) {
-    throw new Error("Application not found.")
+    throw notFound("Application not found.")
   }
 
   if (!application.jobDescription) {
-    throw new Error("No job description found for this application.")
+    throw badRequest("No job description found for this application.")
   }
 
-  // Compute missing keywords locally — no Gemini call needed
   const missingKeywords = getMissingKeywords(
     application.jobDescription,
     user.resumeText
   )
 
-  // Gemini call — only what requires intelligence
   const prompt = `
 You are an expert technical recruiter.
 
@@ -93,12 +145,8 @@ JOB DESCRIPTION:
 ${application.jobDescription}
 `
 
-  const result = await geminiModel.generateContent(prompt)
-  const text = result.response.text()
-  const clean = text.replace(/```json|```/g, "").trim()
-  const parsed = JSON.parse(clean)
+  const parsed = await callGemini(prompt)
 
-  // Save to DB — upsert so reanalysis overwrites previous result
   const saved = await prisma.resumeAnalysis.upsert({
     where: { applicationId },
     update: {
@@ -121,7 +169,6 @@ ${application.jobDescription}
   })
 
   return {
-    
     ...saved,
     missingKeywords: JSON.parse(saved.missingKeywords),
     strongestPoints: JSON.parse(saved.strongestPoints),
@@ -130,7 +177,6 @@ ${application.jobDescription}
   }
 }
 
-// --- Get saved analysis ---
 export const getResumeAnalysis = async (
   userId: string,
   applicationId: string
@@ -140,7 +186,7 @@ export const getResumeAnalysis = async (
   })
 
   if (!application) {
-    throw new Error("Application not found.")
+    throw notFound("Application not found.")
   }
 
   const analysis = await prisma.resumeAnalysis.findUnique({
@@ -153,6 +199,9 @@ export const getResumeAnalysis = async (
     ...analysis,
     missingKeywords: JSON.parse(analysis.missingKeywords),
     strongestPoints: JSON.parse(analysis.strongestPoints),
-    redFlags: JSON.parse(analysis.redFlags)
+    redFlags: JSON.parse(analysis.redFlags),
+    suggestions: JSON.parse(analysis.suggestions)
   }
 }
+
+export { AppError }

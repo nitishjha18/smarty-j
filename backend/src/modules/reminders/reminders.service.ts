@@ -1,4 +1,5 @@
 import prisma from "../../config/db"
+import { notFound } from "../../utils/AppError"
 
 export const createReminder = async (
   userId: string,
@@ -11,7 +12,7 @@ export const createReminder = async (
   })
 
   if (!application) {
-    throw new Error("Application not found.")
+    throw notFound("Application not found.")
   }
 
   const reminder = await prisma.reminder.create({
@@ -37,7 +38,7 @@ export const updateReminder = async (
   })
 
   if (!existing) {
-    throw new Error("Reminder not found.")
+    throw notFound("Reminder not found.")
   }
 
   return prisma.reminder.update({
@@ -52,7 +53,7 @@ export const deleteReminder = async (userId: string, reminderId: string) => {
   })
 
   if (!existing) {
-    throw new Error("Reminder not found.")
+    throw notFound("Reminder not found.")
   }
 
   await prisma.reminder.delete({

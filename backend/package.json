@@ -26,6 +26,8 @@
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
     "pdf2json": "^4.0.3",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
     "prisma": "^5.22.0",
     "resend": "^6.12.3"
   },
@@ -38,6 +40,7 @@
     "@types/node": "^25.9.5",
     "@types/pdf-parse": "^1.1.5",
     "nodemon": "^3.1.14",
+    "pino-pretty": "^13.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"
   }

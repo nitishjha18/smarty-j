@@ -442,10 +442,6 @@ The extracted text is stored in `User.resumeText`. It is not cleaned or normaliz
 
 ## 10. What Was Intentionally Left Out
 
-### Global Error Handler
-
-Each controller has its own try/catch block. There is no centralized Express error handler (`app.use((err, req, res, next) => {})`) and no handler for unknown routes. Errors thrown inside an async route handler that escape its try/catch fall through to Express's default error response. Rejections outside the request cycle, such as the reminder cron callback, are not handled at all and surface as unhandled promise rejections. The effect on the process was inferred from the code and Express 5 behavior, not reproduced by running it. A global handler must be added before production deployment (`docs/code-bugs.md` CB-01).
-
 ### Zod Input Validation
 
 No request body validation exists. Prisma will reject fields that don't match the schema type but will not validate business rules like required fields or enum values. Invalid input can produce unhelpful Prisma error messages. Zod schemas for each endpoint's request body are planned for the hardening phase (`docs/code-bugs.md` CB-01).
@@ -478,8 +474,13 @@ The frontend uses a consistent light-oriented shell, dashboard, application, and
 
 ## 11. Known Technical Debt
 
-**No global error handler** (CB-01)
-There is no error-handling middleware, no 404 handler, and no process-level `unhandledRejection` handler. Errors outside a try/catch (including the reminder cron callback) are not handled, and several controllers return raw `Error.message` text to the client (`400` for AI and reminders, `500` for applications). This is a reliability and information-exposure risk in production.
+### Global error handling and logging (resolved)
+
+The backend now has a global Express error handler (`backend/src/middleware/errorHandler.ts`) and a JSON `404 { "error": "Route not found" }` handler for unknown routes. Service-layer errors are thrown as `AppError` with explicit status codes; Prisma validation errors, known request codes (P2025 → 404, P2002 → 409, P2003 → 400), multer errors (`LIMIT_FILE_SIZE` → 413 with the 5 MB message, others → 400), and malformed JSON (400 `"Invalid JSON in request body"`) all map to safe client messages. Unknown errors return `500 { "error": "Internal server error" }` — raw Prisma, Gemini, and stack traces never reach the client.
+
+Logging uses Pino (`backend/src/config/logger.ts`) with `pino-http` for per-request logs. Every request gets a UUID request id, echoed as the `X-Request-Id` response header and attached to every log line for that request. `Authorization` and `Cookie` headers are redacted and request bodies are never logged. The `LOG_LEVEL` environment variable controls the level; pretty output is used outside `NODE_ENV=production`.
+
+Process-level handlers in `index.ts` log `unhandledRejection` at error level and `uncaughtException` at fatal level before exiting with code 1 so Railway restarts the process. The reminder cron callback is wrapped in a top-level try/catch so a database failure cannot become an unhandled rejection, and each per-reminder send is still isolated in its own try/catch.
 
 **No input validation** (CB-01)
 All endpoints accept arbitrary JSON bodies. Prisma rejects type mismatches but does not enforce required fields or valid enum values at the application layer.
@@ -487,8 +488,8 @@ All endpoints accept arbitrary JSON bodies. Prisma rejects type mismatches but d
 **No automated tests** (CB-01)
 Neither project has tests or a test script.
 
-**Resume upload: no size limit, multer errors unhandled** (CB-02)
-`multer` is configured with memory storage and no limits, the PDF check trusts the client-declared mimetype, and a PDF with no extractable text is accepted.
+**Resume upload: PDF mimetype trust** (CB-02)
+A 5 MB file-size limit is enforced by `multer`, pdf2json parse failures and empty-text PDFs are rejected with explicit 400 messages, and multer errors are mapped by the global error handler. The PDF check still trusts the client-declared mimetype.
 
 **Tracked build output and generated Prisma client** (CB-03)
 `backend/dist/` and `backend/src/generated/prisma/` are committed, `backend/.gitignore` lists the wrong generated path (`/generated/prisma`) and does not ignore `dist`, and the root `.gitignore` has no `.env*`, `node_modules` or `dist` rule.
