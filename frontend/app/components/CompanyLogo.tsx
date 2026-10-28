@@ -18,7 +18,7 @@ export default function CompanyLogo({
 
   return (
     <div
-      className="shrink-0 flex items-center justify-center overflow-hidden bg-[#F3F4F6] border border-[#E5E7EB] font-bold text-[#6B7280]"
+      className="shrink-0 flex items-center justify-center overflow-hidden bg-surface-alt border border-line font-bold text-muted"
       style={{
         width: size,
         height: size,
