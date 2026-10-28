@@ -1,7 +1,7 @@
 # ApplynTrack — Profile Module
 
 Status: Built
-Last updated: October 2026
+Last updated: October 29, 2026
 
 ## 1. Module Overview
 
@@ -43,7 +43,7 @@ Response `200`:
 { "user": { "id": "...", "clerkId": "...", "name": "...", "email": "...", "profilePicture": "...", "targetRole": "...", "experienceLevel": "...", "resumeUrl": "...", "resumeText": "...", "createdAt": "...", "updatedAt": "..." } }
 ```
 
-Errors: missing or invalid token returns `401 { "error": "Unauthorized" }`; a valid Clerk token without a local user returns `401 { "error": "User not found. Please sync first." }` (from `requireUser`, the same as every other protected route); unexpected failures return `500 { "error": "Internal server error" }`. The controller also contains a `404 { "error": "User not found" }` branch, but `requireUser` runs first, so that response is effectively never returned (see `docs/code-bugs.md` CB-14).
+Errors: missing or invalid token returns `401 { "error": "Unauthorized" }`; a valid Clerk token without a local user returns `401 { "error": "User not found. Please sync first." }` (from `requireUser`, the same as every other protected route); unexpected failures return `500 { "error": "Internal server error" }`. The controller also contains a `404 { "error": "User not found" }` branch, but `requireUser` runs first, so that response is effectively never returned.
 
 ### PUT /api/user/profile
 
@@ -63,7 +63,7 @@ Response `200`:
 { "user": { "id": "...", "clerkId": "...", "name": "...", "email": "...", "profilePicture": "...", "targetRole": "...", "experienceLevel": "...", "resumeUrl": "...", "resumeText": "...", "createdAt": "...", "updatedAt": "..." } }
 ```
 
-Errors: missing or invalid token returns `401 { "error": "Unauthorized" }`; a valid Clerk token without a local user returns `401 { "error": "User not found. Please sync first." }`; unexpected failures return `500 { "error": "Internal server error" }`.
+Errors: missing or invalid token returns `401 { "error": "Unauthorized" }`; a valid Clerk token without a local user returns `401 { "error": "User not found. Please sync first." }`; unexpected failures return `500 { "error": "Internal server error" }`. The controller does not validate the body: empty strings are saved as-is, and a non-string value is rejected by Prisma as `400 { "error": "Invalid request data" }`.
 
 ### POST /api/user/resume
 
@@ -92,9 +92,18 @@ Response `200`:
 }
 ```
 
-Errors: `400 { "error": "No file uploaded" }`; `400 { "error": "Only PDF files are allowed" }`; `500 { "error": "Failed to upload to storage" }`; unexpected failures return `500 { "error": "Internal server error" }`, including a PDF that `pdf2json` cannot parse.
+Errors:
 
-The upload has no file-size limit, and the PDF check uses only the client-declared mimetype. Errors raised by `multer` itself (for example an unexpected form field name) are not caught by the controller, and the exact response was not verified; do not rely on it having the `{ "error": ... }` shape. A PDF with no extractable text (for example a scanned image) is accepted and stored with empty `resumeText`. Known issue — see `docs/code-bugs.md` CB-02.
+- `400 { "error": "No file uploaded" }`
+- `400 { "error": "Only PDF files are allowed" }`
+- `400 { "error": "Could not read this PDF. Please upload a different file." }` when `pdf2json` cannot parse the file
+- `400 { "error": "No readable text found in this PDF. Please upload a text-based PDF, not a scanned image." }` when the extracted text is empty; nothing is uploaded to storage in this case
+- `413 { "error": "File is too large. Maximum size is 5 MB." }`
+- `400 { "error": "Invalid file upload" }` for other multer errors (for example an unexpected form field name)
+- `500 { "error": "Failed to upload to storage" }`
+- unexpected failures return `500 { "error": "Internal server error" }`
+
+The 5 MB limit is enforced by `multer` and mapped by the backend's global error handler. The PDF check uses only the client-declared mimetype, not the file contents.
 
 ---
 
@@ -201,5 +210,6 @@ The fields initialize during render the first time a profile ID arrives (guarded
 ## 8. Known Limitations
 
 - Resume files are served from a public Supabase Storage URL. Anyone with the URL can access the file.
-- The redesigned sidebar footer shows name and email instead of the target role, so the old `publicMetadata.targetRole` read (CB-06) no longer exists in the code. The role saved here is still not shown in the sidebar.
-- The resume upload has no size limit and does not reject a PDF with no extractable text. See `docs/code-bugs.md` CB-02.
+- The sidebar footer shows name and email, so the target role saved here is not shown anywhere in the sidebar.
+- The resume PDF check trusts the client-declared mimetype; the backend never inspects the file contents beyond parsing it.
+- The `Replace` warning is shown only in the UI; the backend deletes saved analyses on every successful upload whether or not the user has seen it.

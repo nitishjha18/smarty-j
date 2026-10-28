@@ -1,7 +1,7 @@
 # Applications Module
 
 Status: Built
-Last updated: October 2026
+Last updated: October 29, 2026
 
 ## 1. Module Overview
 
@@ -78,9 +78,11 @@ The service automatically creates an `APPLIED` `StatusHistory` record.
 Errors:
 
 - `400 { "error": "companyName, jobTitle, and source are required" }`
-- unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message
+- an invalid enum value, wrongly typed field or unparseable date is rejected by Prisma and returned as `400 { "error": "Invalid request data" }`
+- unexpected failures return `500 { "error": "Internal server error" }`; raw database or provider messages are never returned
 
-No body validation exists beyond the required-field check. An invalid `source` or `dateApplied` value reaches Prisma and fails there. Known issue — see `docs/code-bugs.md` CB-01.
+No body validation exists beyond the required-field check. An invalid `source` or `dateApplied` value reaches Prisma and is returned as `400 { "error": "Invalid request data" }`.
+Errors are produced by the backend's global error handler; the shared shapes are listed at the top of `docs/backend-api.md`.
 
 ### GET /api/applications
 
@@ -153,7 +155,8 @@ Response `200`:
 Errors:
 
 - `404 { "error": "Application not found" }`
-- unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message
+- an invalid enum value, wrongly typed field or unparseable date is rejected by Prisma and returned as `400 { "error": "Invalid request data" }`
+- unexpected failures return `500 { "error": "Internal server error" }`; raw database or provider messages are never returned
 
 ### PUT /api/applications/:id
 
@@ -181,7 +184,8 @@ When `status` changes, the service automatically creates a new `StatusHistory` r
 Errors:
 
 - `404 { "error": "Application not found" }`
-- unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message
+- an invalid enum value, wrongly typed field or unparseable date is rejected by Prisma and returned as `400 { "error": "Invalid request data" }`
+- unexpected failures return `500 { "error": "Internal server error" }`; raw database or provider messages are never returned
 
 ### DELETE /api/applications/:id
 
@@ -196,7 +200,8 @@ Response `200`:
 Errors:
 
 - `404 { "error": "Application not found" }`
-- unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message
+- an invalid enum value, wrongly typed field or unparseable date is rejected by Prisma and returned as `400 { "error": "Invalid request data" }`
+- unexpected failures return `500 { "error": "Internal server error" }`; raw database or provider messages are never returned
 
 Deleting an application also removes its related `StatusHistory`, `ResumeAnalysis`, and `Reminder` data.
 
@@ -243,12 +248,10 @@ Errors:
 
 - `400 { "error": "applicationId is required" }`
 - `400 { "error": "Resume not found. Please upload your resume first." }`
-- `400 { "error": "Application not found." }`
+- `404 { "error": "Application not found." }`
 - `400 { "error": "No job description found for this application." }`
-- any other thrown `Error`, including a database or Gemini failure, also returns `400` with that error's raw message
-- `500 { "error": "Internal server error" }` is returned only when the thrown value is not an `Error`
-
-The generic `400` is a known issue — see `docs/code-bugs.md` CB-01.
+- `503 { "error": "AI analysis is temporarily unavailable. Please try again in a moment." }` when the Gemini call fails (network, bad API key, overload) or returns invalid JSON or the wrong shape. The original error is logged on the server only.
+- unexpected failures return `500 { "error": "Internal server error" }`
 
 ### GET /api/ai/resume-analysis/:appId
 
@@ -270,14 +273,14 @@ Response `200` when analysis exists:
       "The resume does not clearly show production cloud deployment experience."
     ],
     "recruiterTake": "A promising backend candidate, but the resume should show stronger evidence of cloud and scaling experience.",
-    "suggestions": "[]",
+    "suggestions": [],
     "createdAt": "2026-09-20T01:22:57.000Z",
     "updatedAt": "2026-09-20T01:22:57.000Z"
   }
 }
 ```
 
-`missingKeywords`, `strongestPoints`, and `redFlags` are returned as arrays, but this endpoint does not parse `suggestions`: it comes back as the JSON string `"[]"`, not the array `[]` that `POST /api/ai/analyze-resume` returns. The frontend never reads `suggestions`, so the AI tab is not affected after a reload. Known issue — see `docs/code-bugs.md` CB-07.
+`missingKeywords`, `strongestPoints`, `redFlags` and `suggestions` are all returned as arrays, the same shape as `POST /api/ai/analyze-resume`. The frontend never reads `suggestions`.
 
 Response `200` when no saved analysis exists:
 
@@ -287,8 +290,8 @@ Response `200` when no saved analysis exists:
 
 Errors:
 
-- `400 { "error": "Application not found." }`
-- any other thrown `Error` also returns `400` with its raw message; `500 { "error": "Internal server error" }` is returned only for a non-Error throw (known issue — `docs/code-bugs.md` CB-01)
+- `404 { "error": "Application not found." }`
+- unexpected failures return `500 { "error": "Internal server error" }`
 
 Important: uploading a new resume from the profile module deletes saved analyses for all of the user's applications. After a resume upload, this endpoint returns `null` until analysis is run again.
 
@@ -324,8 +327,9 @@ Response `201`:
 Errors:
 
 - `400 { "error": "applicationId and reminderDate are required" }`
-- `400 { "error": "Application not found." }`
-- any other thrown `Error` also returns `400` with its raw message; `500 { "error": "Internal server error" }` is returned only for a non-Error throw (known issue — `docs/code-bugs.md` CB-01)
+- `400 { "error": "Invalid request data" }` when `reminderDate` cannot be parsed as a date
+- `404 { "error": "Application not found." }`
+- unexpected failures return `500 { "error": "Internal server error" }`
 
 ### PUT /api/reminders/:id
 
@@ -340,13 +344,14 @@ Errors:
 
 Response `200` is `{ "reminder": { ... } }`.
 
-The update sets only `reminderDate` and `notes`. It does not reset `isSent`, so a reminder that has already been sent and is moved to a new date is never sent again (the cron job selects only `isSent: false`). Known issue — see `docs/code-bugs.md` CB-10.
+The update sets only `reminderDate` and `notes`. It does not reset `isSent`, so a reminder that has already been sent and is moved to a new date is never sent again (the cron job selects only `isSent: false`).
 
 Errors:
 
 - `400 { "error": "reminderDate is required" }`
-- `400 { "error": "Reminder not found." }`
-- any other thrown `Error` also returns `400` with its raw message; `500 { "error": "Internal server error" }` is returned only for a non-Error throw (known issue — `docs/code-bugs.md` CB-01)
+- `400 { "error": "Invalid request data" }` when `reminderDate` cannot be parsed as a date
+- `404 { "error": "Reminder not found." }`
+- unexpected failures return `500 { "error": "Internal server error" }`
 
 ### DELETE /api/reminders/:id
 
@@ -360,8 +365,8 @@ Response `200`:
 
 Errors:
 
-- `400 { "error": "Reminder not found." }`
-- any other thrown `Error` also returns `400` with its raw message; `500 { "error": "Internal server error" }` is returned only for a non-Error throw (known issue — `docs/code-bugs.md` CB-01)
+- `404 { "error": "Reminder not found." }`
+- unexpected failures return `500 { "error": "Internal server error" }`
 
 ---
 
@@ -385,14 +390,28 @@ frontend/app/(protected)/applications/page.tsx
 
 ### Purpose and content
 
-The page header shows `Applications` and a subline: `{n} total · {x} gone quiet`, or `{n} total · All caught up — no stale applications` when nothing is stale. A `New application` button (44px) sits on the right. The orange `{x} gone quiet →` text is a link that scrolls the board to the first card with a `QUIET` label. The list is a six-column status board that scrolls horizontally (280px columns, 16px gap) and fills the available height, with thin scrollbars. Each column has a centered status name and count, a status-colored bar, and cards. A card shows the company logo (letter avatar tinted with the status color when there is no logo), company name, job title, and a mono line `SOURCE · MMM D`. Within a column the backend's descending `dateApplied` order is preserved. Cards are links to the detail page: there is no drag-and-drop, and status changes happen on the detail page. `REJECTED` cards are dimmed.
+The page header shows `Applications` and a subline: `{n} total · {x} gone quiet`, or `{n} total · All caught up — no stale applications` when nothing is stale. A `New application` button (44px) sits on the right. The orange `{x} gone quiet →` text is a link that scrolls the board to the first card with a `QUIET` label. The list is a six-column status board that scrolls horizontally (280px columns, 16px gap) and fills the available height, with thin scrollbars. Each column has a centered status name and count, a status-colored bar, and cards. A card shows the company logo (letter avatar tinted with the status color when there is no logo), company name, job title, and a mono line `SOURCE · MMM D`. Within a column the backend's descending `dateApplied` order is preserved. Cards are links to the detail page and can also be dragged to another column to change their status (see Drag and drop below). Status can still be changed on the detail page. `REJECTED` cards are dimmed.
 
-Two different "stale" measures appear on this page (known issue — see `docs/code-bugs.md` CB-04):
+Two different "stale" measures appear on this page (and the dashboard and the backend stat use further variants, so counts can disagree):
 
 - **Header count:** `{n} gone quiet`. The count includes only applications whose status is `APPLIED` and whose `dateApplied` is 14 or more days ago. It does not look at status history.
 - **Card label:** `QUIET {n} DAYS` in orange on a card when 14 or more days have passed since its most recent status change (the newest `statusHistory` entry, or `updatedAt` when there is no history), via `daysSinceLastStatusChange`. It applies to a card in any status, including `OFFER` and `REJECTED`.
 
 Status colors come from `STATUS_STYLES` (Applied blue, Screening amber, Interview purple, Assignment teal, Offer green, Rejected rose).
+
+### Drag and drop
+
+Built with `@dnd-kit/core` and `@dnd-kit/utilities`. A card can be dropped into any of the six columns, including backwards and into `REJECTED`.
+
+- **Activation:** mouse after 6px of movement (so a plain click still opens the card), touch after a 200ms press-and-hold (so horizontal scrolling still works), keyboard on `Space`. `Enter` still follows the card's link.
+- **Drop:** the column under the pointer is highlighted with its status color (`ring` and tint from `STATUS_STYLES`). Dropping on the card's current column, or outside any column, does nothing and makes no API call.
+- **Request:** `useMoveApplication()` in `frontend/app/lib/queries.ts` sends `PUT /api/applications/:id` with `{ status }` for any application id. On success it does what `useUpdateApplication` does: writes the returned application into that application's detail query and invalidates the applications list and dashboard stats.
+- **Optimistic update:** on drop the card moves to the new column in the applications-list cache immediately, with an optimistic `statusHistory` entry (so its `QUIET` label disappears). If the request fails, only that application is restored from its pre-move copy and the API error message is shown in red under the page subtitle (`role="alert"`). It clears on the next drag.
+- **In flight:** a card with a pending update is dimmed, pulses, and cannot be dragged again until the request settles.
+- **Order:** columns keep the backend's `dateApplied` descending order; there is no reordering within a column.
+- **Drag preview:** a `DragOverlay` copy of the card (slightly rotated, with a larger shadow) follows the pointer; the original is dimmed.
+- **Auto-scroll:** dragging near the left or right edge of the board scrolls it horizontally (and the lane list vertically).
+- **Keyboard:** focus a card, press `Space` to pick it up, `ArrowLeft`/`ArrowRight` to move to the neighbouring column, `Space` to drop, `Escape` to cancel. A live region announces `Picked up Google.`, `Google is over Interview.`, and `Moved Google to Interview.`.
 
 ### Company logo
 
@@ -642,7 +661,7 @@ It writes to `navigator.clipboard`, sets `copied` to true, then resets that feed
 |---|---|
 | No job description | `Add a job description to this application first.`; no API call |
 | Any error message that contains the word "resume" (case-insensitive) | `No resume uploaded. Upload one from your profile page.` |
-| Any other error | Render the API error message verbatim |
+| Any other error, including `AI analysis is temporarily unavailable. Please try again in a moment.` (`503`) | Render the API error message verbatim |
 
 The "resume" check is a substring match on the error message, so it covers `Resume not found. Please upload your resume first.` and would also match any other backend message that mentions a resume.
 
@@ -701,11 +720,11 @@ await createReminder.mutateAsync({
 })
 ```
 
-The detail-page UI currently creates reminders only. The backend exposes update and delete reminder endpoints, but the page has no reminder list endpoint to support full management yet. The client helpers `updateReminder` and `deleteReminder` in `frontend/app/lib/api.ts`, and the `Reminder` type in `frontend/app/types/index.ts`, are defined but not used by any component (see `docs/code-bugs.md` CB-13).
+The detail-page UI currently creates reminders only. The backend exposes update and delete reminder endpoints, but the page has no reminder list endpoint to support full management yet. The client helpers `updateReminder` and `deleteReminder` in `frontend/app/lib/api.ts`, and the `Reminder` type in `frontend/app/types/index.ts`, are defined but not used by any component.
 
 ### Reminder copy
 
-The redesign removed the `How reminders work` card, including its false last bullet (`You can update or delete a reminder any time before it fires.`, CB-08). The form now shows the hint `We'll email you on this date with the application details.`.
+The redesign removed the `How reminders work` card, including its last bullet (`You can update or delete a reminder any time before it fires.`), which described controls the UI does not have. The form now shows the hint `We'll email you on this date with the application details.`.
 
 ### Upcoming reminders placeholder
 
@@ -719,26 +738,27 @@ In practice: when setting a same-day reminder late at night IST, use the next ca
 
 ### Email and cron
 
-The email subject is `Reminder — {jobTitle} at {companyName}`. The body greets the user with their full stored `name` (`Hi {name},`, not just the first name) and shows the job title, company name, and the reminder note when one was provided. These values are inserted into the HTML without escaping (known issue — `docs/code-bugs.md` CB-09). The cron expression is:
+The email subject is `Reminder — {jobTitle} at {companyName}`. The body greets the user with their full stored `name` (`Hi {name},`, not just the first name) and shows the job title, company name, and the reminder note when one was provided. These values are inserted into the HTML without escaping. The email's header and accent are indigo (`#4F46E5`). The cron expression is:
 
 ```text
 0 9 * * *
 ```
 
-It is configured in `backend/src/jobs/reminderJob.ts` and started by `startReminderJob()` in `index.ts` after `app.listen`. No timezone option is set, so 9am means the server's local time. Its date query uses `setUTCHours` and `setUTCDate` explicitly, so the range it matches is a UTC calendar day. The callback has no outer `try/catch`; only each individual send is wrapped (see `docs/code-bugs.md` CB-01).
+It is configured in `backend/src/jobs/reminderJob.ts` and started by `startReminderJob()` in `index.ts` after `app.listen`. No timezone option is set, so 9am means the server's local time. Its date query uses `setUTCHours` and `setUTCDate` explicitly, so the range it matches is a UTC calendar day. The whole callback is wrapped in a `try/catch`, and each individual send has its own, so one failure is logged without stopping the others.
 
 ---
 
 ## 9. Known Limitations
 
 - The applications list has no pagination, filter, or search.
+- Drag-and-drop does not reorder cards inside a column, and keyboard moves only jump between columns.
 - The reminder UI cannot view, edit, or delete existing reminders because there is no list-reminders endpoint.
 - The `Upcoming` column on the Reminder tab is currently a placeholder.
 - UTC/IST mismatch can cause same-day reminders set late at night to be missed.
 - If the backend server is down at 9am, that day's reminders are missed because there is no retry mechanism.
-- `suggestions` is part of the `ResumeAnalysis` type but is always empty. `POST /api/ai/analyze-resume` returns `[]` and `GET /api/ai/resume-analysis/:appId` returns the string `"[]"` (CB-07).
-- The list page's header count, its card label, the dashboard, and the backend stat each define "stale" differently (CB-04).
-- `PUT /api/reminders/:id` does not reset `isSent` (CB-10).
+- `suggestions` is part of the `ResumeAnalysis` type but is always an empty array; the frontend never reads it.
+- The list page's header count, its card label, the dashboard, and the backend stat each define "stale" differently.
+- `PUT /api/reminders/:id` does not reset `isSent`.
 - The pre-filled `dateApplied` on the create page is the UTC date, which is the previous day in India between 00:00 and 05:30 IST.
 - The three-dot menu's `Edit details` item is disabled. Company, title, source, and job description cannot be edited in the UI.
 - Resume upload replaces every cached saved analysis with `null`; the detail page reflects that cache update without needing a refresh.

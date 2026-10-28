@@ -16,7 +16,7 @@ export default function AiFit() {
             <div className="mt-2.5 flex items-start justify-between gap-5">
               <p className="m-0 text-lg tracking-[-0.01em] leading-[1.35]">
                 <b className="font-semibold">Google</b>{" "}
-                <span className="text-body">— Senior Frontend Engineer</span>
+                <span className="text-body">— Software Engineer I</span>
               </p>
               <div className="shrink-0 text-right">
                 <div className="flex items-baseline justify-end gap-1">

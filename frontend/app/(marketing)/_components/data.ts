@@ -11,16 +11,16 @@ export type Company = {
 }
 
 export const COMPANIES: Record<string, Company> = {
-  google: { name: "Google", companyDomain: "google.com", role: "Senior Frontend Engineer", source: "LinkedIn", date: "Sep 17", quiet: 27 },
-  microsoft: { name: "Microsoft", companyDomain: "microsoft.com", role: "Frontend Engineer II", source: "Company website", date: "Sep 23", quiet: 21 },
-  vercel: { name: "Vercel", companyDomain: "vercel.com", role: "Senior Frontend Engineer", source: "Company website", date: "Oct 6" },
-  stripe: { name: "Stripe", companyDomain: "stripe.com", role: "Product Engineer", source: "Company website", date: "Sep 24" },
-  notion: { name: "Notion", companyDomain: "notion.so", role: "Product Engineer", source: "Referral", date: "Oct 4" },
-  airbnb: { name: "Airbnb", companyDomain: "airbnb.com", role: "Frontend Engineer, Hosting", source: "LinkedIn", date: "Sep 9" },
-  linear: { name: "Linear", companyDomain: "linear.app", role: "Frontend Engineer", source: "LinkedIn", date: "Sep 30" },
-  figma: { name: "Figma", companyDomain: "figma.com", role: "Software Engineer, Web Platform", source: "Referral", date: "Sep 27" },
-  shopify: { name: "Shopify", companyDomain: "shopify.com", role: "Senior React Developer", source: "Company website", date: "Aug 25" },
-  netflix: { name: "Netflix", companyDomain: "netflix.com", role: "UI Engineer", source: "LinkedIn", date: "Sep 1" },
+  google: { name: "Google", companyDomain: "google.com", role: "Software Engineer I", source: "LinkedIn", date: "Sep 17", quiet: 27 },
+  microsoft: { name: "Microsoft", companyDomain: "microsoft.com", role: "Associate Software Engineer", source: "Company website", date: "Sep 23", quiet: 21 },
+  vercel: { name: "Vercel", companyDomain: "vercel.com", role: "Junior Frontend Developer", source: "Company website", date: "Oct 6" },
+  stripe: { name: "Stripe", companyDomain: "stripe.com", role: "Junior Backend Developer", source: "Company website", date: "Sep 24" },
+  notion: { name: "Notion", companyDomain: "notion.so", role: "Associate Product Analyst", source: "Referral", date: "Oct 4" },
+  airbnb: { name: "Airbnb", companyDomain: "airbnb.com", role: "Graduate Engineer Trainee", source: "LinkedIn", date: "Sep 9" },
+  linear: { name: "Linear", companyDomain: "linear.app", role: "SDE Intern", source: "LinkedIn", date: "Sep 30" },
+  figma: { name: "Figma", companyDomain: "figma.com", role: "Associate Data Analyst", source: "Referral", date: "Sep 27" },
+  shopify: { name: "Shopify", companyDomain: "shopify.com", role: "QA Engineer Trainee", source: "Company website", date: "Aug 25" },
+  netflix: { name: "Netflix", companyDomain: "netflix.com", role: "Cloud Support Associate", source: "LinkedIn", date: "Sep 1" },
 }
 
 export type BoardColumnData = {

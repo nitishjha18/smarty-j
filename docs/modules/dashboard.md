@@ -1,17 +1,17 @@
 # Dashboard Module
 
 Status: Built
-Last updated: October 2026
+Last updated: October 29, 2026
 
 ## 1. Module Overview
 
-The dashboard is the first page after sign-in and works as a morning briefing: a greeting with today's date and a one-line status summary, a pipeline strip with counts per stage, and three cards: Recent Activity, an Activity Calendar, and Needs Attention. Company logos appear in Recent Activity and Needs Attention.
+The dashboard is the first page after sign-in and works as a morning briefing: a time-of-day greeting with a one-line status summary and a date chip, a pipeline strip with counts per stage, an Activity calendar, a Gone quiet card (stale applications with a `Remind me` link), and a Recent activity timeline. Company logos (`CompanyLogo`) appear in all three of the calendar, Gone quiet and Recent activity. With no applications, the area below the strip shows an `Add your first application` empty state.
 
 ---
 
 ## 2. Backend API Contract
 
-Both endpoints require `Authorization: Bearer <token>`. Call `getToken()` fresh before requesting them. Missing or invalid tokens return `401 { "error": "Unauthorized" }`; a valid Clerk token with no local user returns `401 { "error": "User not found. Please sync first." }`.
+Both endpoints require `Authorization: Bearer <token>`. Call `getToken()` fresh before requesting them. Missing or invalid tokens return `401 { "error": "Unauthorized" }`; a valid Clerk token with no local user returns `401 { "error": "User not found. Please sync first." }`. Other errors come from the backend's global error handler (shared shapes at the top of `docs/backend-api.md`).
 
 ### GET /api/dashboard/stats
 
@@ -37,7 +37,7 @@ Response `200`:
 | `responseRate` | Integer percentage of applications that moved past `APPLIED` |
 | `rejectionRate` | Integer percentage of applications with `REJECTED` status |
 | `bestSource` | `ApplicationSource` value with the most non-`APPLIED` responses, or `null` |
-| `staleApplications` | Applications with status `APPLIED` whose `dateApplied` is earlier than the current time minus 14 days (server local time, strict `<`). Not used by the page, which computes its own count; see the stale note in Section 9 and `docs/code-bugs.md` CB-04 |
+| `staleApplications` | Applications with status `APPLIED` whose `dateApplied` is earlier than the current time minus 14 days (server local time, strict `<`). Not used by the page, which computes its own count; see the stale note in Section 9 |
 
 The page reads only `totalApplications`. The other fields are fetched but not displayed.
 
@@ -80,7 +80,7 @@ Response `200`:
 
 `companyDomain` is `null` for applications without a stored domain.
 
-Unexpected failures return `500 { "error": "Internal server error" }` or the thrown error message.
+Unexpected failures return `500 { "error": "Internal server error" }`; raw database messages are never returned.
 
 ---
 
@@ -109,7 +109,7 @@ const error = statsQuery.error?.message ?? applicationsQuery.error?.message ?? n
 
 The cached application list is shared with the applications page. A refetch keeps cached data visible; `loading` is therefore a first-load state.
 
-### Pipeline counts and peak stage
+### Pipeline counts
 
 ```ts
 const pipelineCounts = PIPELINE_STAGES.reduce((acc, stage) => {
@@ -118,42 +118,29 @@ const pipelineCounts = PIPELINE_STAGES.reduce((acc, stage) => {
 }, {} as Record<string, number>)
 ```
 
-`PIPELINE_STAGES` is `APPLIED`, `SCREENING`, `INTERVIEW`, `ASSIGNMENT`, `OFFER`. The peak stage is the first stage in that order that has the highest nonzero count, or `null` when every count is zero.
+`PIPELINE_STAGES` (from `frontend/app/lib/status.ts`) is `APPLIED`, `SCREENING`, `INTERVIEW`, `ASSIGNMENT`, `OFFER`. While loading, every count shows `0`.
 
-### Recent activity feed
+### Status-change feed
 
-Every `statusHistory` entry from every application is flattened, sorted newest first, and cut to 5. Each entry carries the company name, domain, and job title for display.
+Every `statusHistory` entry from every application is flattened into one list. Within each application the entries are sorted oldest first so each entry can carry the status it moved from (the previous entry's status, or none for the first). Each item carries the application id, company name, domain, job title, new status, previous status and timestamp. This list feeds both the calendar and Recent activity.
 
-```ts
-const recentActivity = applications
-  .flatMap((app) =>
-    (app.statusHistory ?? []).map((entry) => ({
-      ...entry,
-      companyName: app.companyName,
-      companyDomain: app.companyDomain,
-      jobTitle: app.jobTitle,
-      appId: app.id,
-    }))
-  )
-  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-  .slice(0, 5)
-```
+### Recent activity
+
+The status-change feed sorted newest first and cut to 5.
 
 ### Stale applications
 
 ```ts
-const staleApps = applications.filter((app) => {
-  if (app.status !== "APPLIED") return false
-  const days = Math.floor(
-    (Date.now() - new Date(app.dateApplied).getTime()) / (1000 * 60 * 60 * 24)
-  )
-  return days >= 14
-})
+const staleApps = applications
+  .map((app) => ({ app, days: Math.floor((now - new Date(app.dateApplied).getTime()) / 86_400_000) }))
+  .filter(({ app, days }) => app.status === "APPLIED" && days >= 14)
 ```
+
+`now` is captured once per page mount (`useState(() => Date.now())`), so the count does not change while the page stays open.
 
 ### Calendar data
 
-For the month being viewed, every `statusHistory` entry dated in that month marks its day as an activity day and adds a tooltip line of the form `{companyName} — moved to {Status}`. The grid is built from the first weekday of the month, padded with empty cells to complete the last week.
+For the month being viewed, every status-change item dated in that month is grouped by day of month. A day cell shows up to two chips (company logo and name) and `+n more`; clicking it opens a popover listing every change on that day. The grid is built from the first weekday of the month (Sunday first), padded with empty cells to complete the last week.
 
 ---
 
@@ -229,7 +216,8 @@ const [openDay, setOpenDay] = useState<number | null>(null)
 
 - The `Today` label in Recent Activity applies to every entry from the current 24-hour window regardless of time of day, so a status changed at 11pm and one at 1am can both show `Today`.
 - The stale threshold is hardcoded to 14 days on the client to match the backend definition. If the backend threshold changes, the client must be updated manually. The page does not use `stats.staleApplications`.
-- "Stale" is defined five different ways across the product: the backend stat (`APPLIED`, strictly more than 14 days), this page (`APPLIED`, whole days since `dateApplied` `>= 14`), the Applications header chip (`APPLIED`, elapsed time `>= 14` days), the Applications card badge (any status, days since the last status change), and the PRD ("no status change in fourteen plus days"). This page and the backend can differ by a day at the boundary. Known issue — see `docs/code-bugs.md` CB-04.
+- The greeting, date chip and stale-day counts are computed on the client from the browser clock when the page mounts; the elements carry `suppressHydrationWarning` where the server-rendered text can differ.
+- "Stale" is defined several ways across the product: the backend stat (`APPLIED`, strictly more than 14 days), this page (`APPLIED`, whole days since `dateApplied` `>= 14`), the Applications board's header count (`APPLIED`, elapsed time `>= 14` days), the board's per-card `QUIET` label (any status, days since the last status change), and the PRD ("no status change in fourteen plus days"). This page and the backend can differ by a day at the boundary.
 - The header subline and the Gone quiet card say applications have "gone quiet" ("no reply after 14 days"), but the count only includes applications still in `APPLIED` status. An application that has moved on to another stage and then gone quiet is not counted.
 - The stats fields other than `totalApplications` are fetched but unused.
 - The pipeline strip does not include `REJECTED`, so users cannot see their rejection count on the dashboard.

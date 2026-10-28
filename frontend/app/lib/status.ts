@@ -43,41 +43,47 @@ export const PIPELINE_STAGES: ApplicationStatus[] = [
  */
 export const STATUS_STYLES: Record<
   ApplicationStatus,
-  { dot: string; border: string; tint: string; text: string }
+  { dot: string; border: string; ring: string; tint: string; text: string }
 > = {
   APPLIED: {
     dot: "bg-st-applied",
     border: "border-st-applied",
+    ring: "ring-st-applied",
     tint: "bg-st-applied-tint",
     text: "text-st-applied-text",
   },
   SCREENING: {
     dot: "bg-st-screening",
     border: "border-st-screening",
+    ring: "ring-st-screening",
     tint: "bg-st-screening-tint",
     text: "text-st-screening-text",
   },
   INTERVIEW: {
     dot: "bg-st-interview",
     border: "border-st-interview",
+    ring: "ring-st-interview",
     tint: "bg-st-interview-tint",
     text: "text-st-interview-text",
   },
   ASSIGNMENT: {
     dot: "bg-st-assignment",
     border: "border-st-assignment",
+    ring: "ring-st-assignment",
     tint: "bg-st-assignment-tint",
     text: "text-st-assignment-text",
   },
   OFFER: {
     dot: "bg-st-offer",
     border: "border-st-offer",
+    ring: "ring-st-offer",
     tint: "bg-st-offer-tint",
     text: "text-st-offer-text",
   },
   REJECTED: {
     dot: "bg-st-rejected",
     border: "border-st-rejected",
+    ring: "ring-st-rejected",
     tint: "bg-st-rejected-tint",
     text: "text-st-rejected-text",
   },

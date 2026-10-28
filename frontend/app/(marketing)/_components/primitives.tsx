@@ -107,7 +107,7 @@ export function MockCard({
           </div>
           <div
             className={cn(
-              "mt-0.5 text-body leading-[1.35]",
+              "mt-0.5 truncate text-body leading-[1.35]",
               large ? "text-sm" : "text-sm2"
             )}
           >

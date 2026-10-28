@@ -22,7 +22,13 @@ import {
   uploadResume,
 } from "./api"
 import { qk } from "./queryKeys"
-import type { Application, DashboardStats, ResumeAnalysis, User } from "../types"
+import type {
+  Application,
+  ApplicationStatus,
+  DashboardStats,
+  ResumeAnalysis,
+  User,
+} from "../types"
 
 function useAuthenticatedUser() {
   return useAuth()
@@ -126,6 +132,61 @@ export function useUpdateApplication(id: string) {
   return useMutation({
     mutationFn: async (data: object) => updateApplication(await getRequiredToken(getToken), id, data),
     onSuccess: (res) => {
+      if (!userId) return
+      queryClient.setQueryData(qk.application(userId, id), res.application)
+      void queryClient.invalidateQueries({ queryKey: qk.applications(userId) })
+      void queryClient.invalidateQueries({ queryKey: qk.dashboardStats(userId) })
+    },
+  })
+}
+
+/**
+ * Status change for any application id (board drag-and-drop). Same request and
+ * cache updates as `useUpdateApplication`, plus an optimistic move in the list
+ * cache that is rolled back for that application if the request fails.
+ */
+export function useMoveApplication() {
+  const queryClient = useQueryClient()
+  const { getToken, userId } = useSyncedAuth()
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: ApplicationStatus }) =>
+      updateApplication(await getRequiredToken(getToken), id, { status }),
+    onMutate: async ({ id, status }) => {
+      if (!userId) return { previousApplication: undefined }
+      await queryClient.cancelQueries({ queryKey: qk.applications(userId) })
+      const previousApplication = queryClient
+        .getQueryData<Application[]>(qk.applications(userId))
+        ?.find((application) => application.id === id)
+      queryClient.setQueryData<Application[]>(qk.applications(userId), (applications) =>
+        applications?.map((application) =>
+          application.id === id
+            ? {
+                ...application,
+                status,
+                statusHistory: [
+                  {
+                    id: `optimistic-${id}`,
+                    applicationId: id,
+                    status,
+                    createdAt: new Date().toISOString(),
+                  },
+                  ...(application.statusHistory ?? []),
+                ],
+              }
+            : application
+        )
+      )
+      return { previousApplication }
+    },
+    onError: (_error, { id }, context) => {
+      if (!userId || !context?.previousApplication) return
+      queryClient.setQueryData<Application[]>(qk.applications(userId), (applications) =>
+        applications?.map((application) =>
+          application.id === id ? context.previousApplication! : application
+        )
+      )
+    },
+    onSuccess: (res, { id }) => {
       if (!userId) return
       queryClient.setQueryData(qk.application(userId, id), res.application)
       void queryClient.invalidateQueries({ queryKey: qk.applications(userId) })

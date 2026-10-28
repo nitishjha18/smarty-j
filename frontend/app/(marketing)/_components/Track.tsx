@@ -68,7 +68,7 @@ export default function Track() {
                   Airbnb
                 </div>
                 <div className="text-sm2 text-body leading-[1.35]">
-                  Frontend Engineer, Hosting
+                  {COMPANIES.airbnb.role}
                 </div>
               </div>
             </div>

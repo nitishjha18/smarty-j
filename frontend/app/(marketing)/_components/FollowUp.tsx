@@ -54,7 +54,7 @@ export default function FollowUp() {
               </div>
               <div className="px-6 sm:px-8 pt-10 pb-[76px]">
                 <p className="m-0 text-[19px] leading-[1.6] text-body">
-                  Hi there, you applied for Frontend Engineer II at Microsoft 21
+                  Hi there, you applied for Associate Software Engineer at Microsoft 21
                   days ago. A short follow-up could move this forward.
                 </p>
                 <Link

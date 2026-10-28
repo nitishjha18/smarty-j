@@ -135,9 +135,6 @@ export default function Hero() {
                   <span className="size-[9px] rounded-full bg-line" />
                   <span className="size-[9px] rounded-full bg-brand-logo" />
                 </div>
-                <span className="ml-[22px] font-mono text-sm2 text-body truncate">
-                  applyntrack.app/applications
-                </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 items-stretch">
                 {HERO_COLUMNS.map((col) => (
