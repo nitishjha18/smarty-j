@@ -3,7 +3,7 @@
 Code and repo issues found in the docs-vs-code audit, deferred until docs are updated.
 
 Date: October 14, 2026
-Status of this file: every item is **Open**. None of these items has been fixed. The other docs describe the behavior the code has today and point here for the known issues.
+Status of this file: items are **Open** unless the table says otherwise. CB-15 was resolved, and CB-06 and CB-08 were changed, by the October 2026 UI redesign. The other docs describe the behavior the code has today and point here for the known issues.
 
 Categories:
 
@@ -20,16 +20,16 @@ Categories:
 | CB-03 | Build output and generated Prisma client are tracked in git, and `.gitignore` files are wrong | Cleanup | Moderate | Open |
 | CB-04 | "Stale application" has five different definitions | Decision | Moderate | Open |
 | CB-05 | Frontend falls back to `http://localhost:5000` and `next.config.ts` rewrites to localhost | Decision | Moderate | Open |
-| CB-06 | Sidebar reads `targetRole` from Clerk `publicMetadata`, which the app never writes | Bug | Minor | Open |
+| CB-06 | Sidebar reads `targetRole` from Clerk `publicMetadata`, which the app never writes | Bug | Minor | Superseded |
 | CB-07 | `GET /api/ai/resume-analysis/:appId` returns `suggestions` as the string `"[]"` | Bug | Minor | Open |
-| CB-08 | Reminder tab text promises update and delete that the UI does not offer | Bug | Minor | Open |
+| CB-08 | Reminder tab text promises update and delete that the UI does not offer | Bug | Minor | Resolved |
 | CB-09 | Reminder email interpolates user text into HTML without escaping | Bug | Minor | Open |
 | CB-10 | `PUT /api/reminders/:id` does not reset `isSent` | Decision | Minor | Open |
 | CB-11 | Unused backend dependencies and a hardcoded ngrok host | Cleanup | Minor | Open |
 | CB-12 | Code comments cite `docs/context.md`, which does not exist | Cleanup | Minor | Open |
 | CB-13 | Unused frontend `updateReminder`, `deleteReminder` and `Reminder` type | Cleanup | Minor | Open |
 | CB-14 | Effectively unreachable "User not found" 404 branch in `getProfileController` | Cleanup | Minor | Open |
-| CB-15 | Placeholder home page, and `/sign-up` is public in middleware but no sign-up page exists | Cleanup | Minor | Open |
+| CB-15 | Placeholder home page, and `/sign-up` is public in middleware but no sign-up page exists | Cleanup | Minor | Resolved (home page); `/sign-up` still has no page |
 
 ---
 
@@ -214,6 +214,8 @@ Categories:
 
 **Docs affected:** `docs/modules/profile.md` (§8 Known Limitations).
 
+**Update (UI redesign):** The redesigned sidebar footer shows the user's name and email, so it no longer reads `publicMetadata.targetRole` at all. The code path described above is gone. The target role saved on the Profile page is still not shown in the sidebar; if that is wanted, read it from `useProfile()`.
+
 ---
 
 ## CB-07 — `GET /api/ai/resume-analysis/:appId` returns `suggestions` as the string `"[]"`
@@ -247,7 +249,7 @@ Categories:
 
 **Current behavior**
 
-- `frontend/app/(protected)/applications/[id]/page.tsx:1104` shows the text "You can update or delete a reminder any time before it fires."
+- (Original finding) `frontend/app/(protected)/applications/[id]/page.tsx:1104` showed the text "You can update or delete a reminder any time before it fires."
 - The Reminder tab only creates a reminder (`POST /api/reminders`). No control calls `PUT` or `DELETE`, and there is no list of existing reminders. The backend endpoints exist.
 
 **Impact**
@@ -336,7 +338,7 @@ Categories:
 
 **Current behavior**
 
-- `frontend/app/(protected)/applications/page.tsx:39` says "Design tokens (docs/context.md §6 + applications-redesign.html)". Neither file is in the repo (`git ls-files` lists no `context.md` and no `applications-redesign.html`).
+- (Original finding) `frontend/app/(protected)/applications/page.tsx:39` said "Design tokens (docs/context.md §6 + applications-redesign.html)". That comment was removed when the page was redesigned; re-check other files before closing this item. Neither file is in the repo (`git ls-files` lists no `context.md` and no `applications-redesign.html`).
 
 **Impact**
 
@@ -397,18 +399,19 @@ Categories:
 
 - **Category and severity:** Cleanup, Minor
 - **Original audit IDs:** New in Step 0 of the audit
+- **Status:** Resolved for the home page (October 2026 UI redesign). `/sign-up` is still open.
 
-**Current behavior**
+**Resolution**
 
-- `frontend/app/page.tsx` renders only `<h1>Job Tracker</h1>`.
-- `frontend/middleware.ts` lists `/sign-up(.*)` as a public route, but the frontend has no sign-up page. How new users register was **not verified**.
+- `frontend/app/page.tsx` was deleted. `/` is now the landing page at `frontend/app/(marketing)/page.tsx`, with its own layout (navbar and footer) and section components in `_components/`. Its calls to action link to `/sign-in`.
+- `frontend/middleware.ts` was not changed. It still lists `/sign-up(.*)` as a public route, and the frontend still has no sign-up page. How new users register was **not verified**.
 
-**Impact**
+**Original behavior**
 
-- Visitors to `/` see a bare heading. A request to `/sign-up` has no page to show.
+- `frontend/app/page.tsx` rendered only `<h1>Job Tracker</h1>`.
 
-**Expected behavior / options**
+**Remaining expected behavior / options**
 
-- Build a landing page and a sign-up page, or remove the unused route entry. Confirm first how sign-up is meant to work.
+- Build a sign-up page, or remove the unused route entry. Confirm first how sign-up is meant to work.
 
 **Docs affected:** `docs/architecture.md` (Known Technical Debt).

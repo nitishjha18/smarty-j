@@ -6,8 +6,8 @@ import { cn } from "../../lib/cn"
 
 const WIDTHS = {
   sm: "max-w-[440px]",
-  md: "max-w-[600px]",
-  lg: "max-w-[900px]",
+  md: "max-w-[640px]",
+  lg: "max-w-[960px]",
 }
 
 /**
@@ -19,6 +19,7 @@ export default function Modal({
   size = "md",
   label,
   showClose = true,
+  closeOnEscape = true,
   className,
   children,
 }: {
@@ -26,6 +27,8 @@ export default function Modal({
   size?: keyof typeof WIDTHS
   label: string
   showClose?: boolean
+  /** Set false while a nested dialog is open so Esc only closes the top one. */
+  closeOnEscape?: boolean
   className?: string
   children: React.ReactNode
 }) {
@@ -33,7 +36,7 @@ export default function Modal({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose()
+      if (e.key === "Escape" && closeOnEscape) onClose()
     }
     document.addEventListener("keydown", onKey)
     const prevOverflow = document.body.style.overflow
@@ -43,11 +46,11 @@ export default function Modal({
       document.removeEventListener("keydown", onKey)
       document.body.style.overflow = prevOverflow
     }
-  }, [onClose])
+  }, [onClose, closeOnEscape])
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-ink/40 p-4"
+      className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-ink/40 p-6"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -69,7 +72,7 @@ export default function Modal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="absolute right-4 top-4 z-10 size-8 inline-flex items-center justify-center rounded-ctl text-body hover:bg-surface-hover hover:text-ink transition-colors"
+            className="absolute right-6 top-6 z-10 size-8 inline-flex items-center justify-center rounded-ctl text-body hover:bg-surface-hover hover:text-ink transition-colors"
           >
             <X size={18} />
           </button>

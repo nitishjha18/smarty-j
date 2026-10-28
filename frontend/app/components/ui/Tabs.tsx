@@ -29,10 +29,10 @@ export default function Tabs<T extends string>({
             aria-selected={active}
             onClick={() => onChange(tab.value)}
             className={cn(
-              "-mb-px h-10 text-sm border-b-2 transition-colors",
+              "-mb-px py-2.5 text-sm font-medium border-b-2 transition-colors",
               active
-                ? "border-brand text-ink font-semibold"
-                : "border-transparent text-body font-medium hover:text-ink"
+                ? "border-brand-logo text-ink"
+                : "border-transparent text-body hover:text-ink"
             )}
           >
             {tab.label}

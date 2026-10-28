@@ -2,18 +2,22 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { ApplicationSource } from "../../../types"
+import { Check } from "lucide-react"
+import type { ApplicationSource } from "../../../types"
 import CompanySearchInput from "../../../components/CompanySearchInput"
+import Button from "../../../components/ui/Button"
+import Chip from "../../../components/ui/Chip"
+import { FieldError, FieldHint, Input, Label, Textarea } from "../../../components/ui/Field"
+import Modal from "../../../components/ui/Modal"
 import { useCreateApplication } from "../../../lib/queries"
+import { SOURCE_LABELS } from "../../../lib/status"
+import ApplicationsPage from "../page"
 
-const SOURCES: { value: ApplicationSource; label: string }[] = [
-  { value: "LINKED_IN", label: "LinkedIn" },
-  { value: "NAUKARI", label: "Naukri" },
-  { value: "REFERAL", label: "Referral" },
-  { value: "COLDEMAIL", label: "Cold Email" },
-  { value: "SOCIAL_MEDIA", label: "Social Media" },
-  { value: "OTHER_JOB_APPS", label: "Other" },
-]
+const SOURCES = Object.keys(SOURCE_LABELS) as ApplicationSource[]
+
+const todayISO = () => new Date().toISOString().split("T")[0]
+
+const Required = () => <span className="ml-0.5 text-danger">*</span>
 
 export default function NewApplicationPage() {
   const router = useRouter()
@@ -26,7 +30,7 @@ export default function NewApplicationPage() {
     jobDescription: "",
     source: "LINKED_IN" as ApplicationSource,
     notes: "",
-    dateApplied: new Date().toISOString().split("T")[0],
+    dateApplied: todayISO(),
   })
   const [error, setError] = useState<string | null>(null)
 
@@ -48,158 +52,137 @@ export default function NewApplicationPage() {
         companyDomain: form.companyDomain || undefined,
       })
       router.push(`/applications/${data.application.id}`)
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     }
   }
 
+  const close = () => router.back()
+
   return (
-    <div className="p-10 max-w-[900px]">
+    <>
+      {/* The board stays visible behind the dialog, like the design. */}
+      <ApplicationsPage />
 
-      {/* Header */}
-      <div className="mb-7">
-        <h1 className="text-2xl font-bold text-[#111827]">New Application</h1>
-        <p className="text-sm text-[#6B7280] mt-1.5">Track a job you've applied to.</p>
-      </div>
+      <Modal
+        onClose={close}
+        size="md"
+        label="New application"
+        className="flex max-h-[min(820px,calc(100vh-48px))] flex-col overflow-hidden"
+      >
+        <div className="shrink-0 px-8 pb-0 pt-7 pr-16">
+          <h1 className="m-0 text-[22px] font-semibold leading-[1.2] tracking-[-0.03em]">
+            New application
+          </h1>
+          <p className="m-0 mt-1 text-sm text-body">Add a job to your tracking pipeline.</p>
+        </div>
 
-      {/* Form card */}
-      <div className="bg-white border border-[#E5E7EB] rounded-xl p-8">
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-8 py-6">
+          <div>
+            <Label>
+              Company name
+              <Required />
+            </Label>
+            <CompanySearchInput
+              value={form.companyName}
+              domain={form.companyDomain}
+              onChange={(name) =>
+                setForm((prev) => ({ ...prev, companyName: name, companyDomain: "" }))
+              }
+              onSelect={({ name, domain }) =>
+                setForm((prev) => ({ ...prev, companyName: name, companyDomain: domain }))
+              }
+            />
+          </div>
 
-        {/* Job Details section */}
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-[18px]">
-            Job Details
-          </p>
+          <div>
+            <Label>
+              Job title
+              <Required />
+            </Label>
+            <Input
+              name="jobTitle"
+              value={form.jobTitle}
+              onChange={handleChange}
+              placeholder="e.g. Senior Frontend Engineer"
+            />
+          </div>
 
-          <div className="flex flex-col gap-5">
-            {/* Company name */}
-            <div>
-              <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-                Company name<span className="text-[#EF4444] ml-0.5">*</span>
-              </label>
-              <CompanySearchInput
-                value={form.companyName}
-                domain={form.companyDomain}
-                onChange={(name) =>
-                  setForm((prev) => ({ ...prev, companyName: name, companyDomain: "" }))
-                }
-                onSelect={({ name, domain }) =>
-                  setForm((prev) => ({ ...prev, companyName: name, companyDomain: domain }))
-                }
-              />
-            </div>
-
-            {/* Job title */}
-            <div>
-              <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-                Job title<span className="text-[#EF4444] ml-0.5">*</span>
-              </label>
-              <input
-                name="jobTitle"
-                value={form.jobTitle}
-                onChange={handleChange}
-                placeholder="e.g. Backend Engineer"
-                className="w-full text-sm text-[#111827] placeholder-[#9CA3AF] bg-white border border-[#E5E7EB] rounded-lg px-3.5 py-2.5 outline-none transition-colors focus:border-[#FF6B35] focus:ring-4 focus:ring-[#FF6B35]/10"
-              />
-            </div>
-
-            {/* Source + Date applied */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-                  Source<span className="text-[#EF4444] ml-0.5">*</span>
-                </label>
-                <select
-                  name="source"
-                  value={form.source}
-                  onChange={handleChange}
-                  className="w-full text-sm text-[#111827] bg-white border border-[#E5E7EB] rounded-lg px-3.5 py-2.5 pr-10 outline-none cursor-pointer transition-colors focus:border-[#FF6B35] focus:ring-4 focus:ring-[#FF6B35]/10 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%2024%2024%27%20fill=%27none%27%20stroke=%27%236B7280%27%20stroke-width=%272%27%20stroke-linecap=%27round%27%20stroke-linejoin=%27round%27%3e%3cpolyline%20points=%276%209%2012%2015%2018%209%27%3e%3c/polyline%3e%3c/svg%3e')] bg-no-repeat bg-[right_0.9rem_center] bg-[length:16px]"
+          <div>
+            <Label>
+              Source
+              <Required />
+            </Label>
+            <div role="group" aria-label="Source" className="flex flex-wrap gap-2">
+              {SOURCES.map((value) => (
+                <Chip
+                  key={value}
+                  selected={form.source === value}
+                  onClick={() => setForm((prev) => ({ ...prev, source: value }))}
                 >
-                  {SOURCES.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-                  Date applied
-                </label>
-                <input
-                  type="date"
-                  name="dateApplied"
-                  value={form.dateApplied}
-                  onChange={handleChange}
-                  className="w-full text-sm text-[#111827] bg-white border border-[#E5E7EB] rounded-lg px-3.5 py-2.5 outline-none transition-colors focus:border-[#FF6B35] focus:ring-4 focus:ring-[#FF6B35]/10"
-                />
-              </div>
+                  {SOURCE_LABELS[value]}
+                </Chip>
+              ))}
             </div>
           </div>
-        </div>
 
-        {/* Divider */}
-        <div className="h-px bg-[#E5E7EB] my-7" />
-
-        {/* Additional Details section */}
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280] mb-[18px]">
-            Additional Details
-          </p>
-
-          <div className="flex flex-col gap-5">
-            {/* Job description */}
-            <div>
-              <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-                Job description
-              </label>
-              <textarea
-                name="jobDescription"
-                value={form.jobDescription}
+          <div>
+            <Label>Date applied</Label>
+            <div className="grid grid-cols-2 items-center gap-3">
+              <Input
+                type="date"
+                name="dateApplied"
+                value={form.dateApplied}
                 onChange={handleChange}
-                placeholder="Paste the job description here..."
-                rows={5}
-                className="w-full text-sm text-[#111827] placeholder-[#9CA3AF] bg-white border border-[#E5E7EB] rounded-lg px-3.5 py-2.5 outline-none transition-colors focus:border-[#FF6B35] focus:ring-4 focus:ring-[#FF6B35]/10 resize-y min-h-[140px] leading-relaxed"
               />
-            </div>
-
-            {/* Notes */}
-            <div>
-              <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-                Notes
-              </label>
-              <textarea
-                name="notes"
-                value={form.notes}
-                onChange={handleChange}
-                placeholder="Any notes about this application..."
-                rows={3}
-                className="w-full text-sm text-[#111827] placeholder-[#9CA3AF] bg-white border border-[#E5E7EB] rounded-lg px-3.5 py-2.5 outline-none transition-colors focus:border-[#FF6B35] focus:ring-4 focus:ring-[#FF6B35]/10 resize-y min-h-[100px] leading-relaxed"
-              />
+              <button
+                type="button"
+                onClick={() => setForm((prev) => ({ ...prev, dateApplied: todayISO() }))}
+                className="text-sm2 font-medium text-muted transition-colors hover:text-brand"
+              >
+                Today
+              </button>
             </div>
           </div>
+
+          <div>
+            <Label>Job description</Label>
+            <Textarea
+              name="jobDescription"
+              value={form.jobDescription}
+              onChange={handleChange}
+              placeholder="Paste the job description here…"
+              rows={5}
+              className="min-h-[140px]"
+            />
+            <FieldHint>Optional — used for AI resume fit.</FieldHint>
+          </div>
+
+          <div>
+            <Label>Notes</Label>
+            <Textarea
+              name="notes"
+              value={form.notes}
+              onChange={handleChange}
+              placeholder="Any notes about this application..."
+              rows={3}
+              className="min-h-24"
+            />
+          </div>
+
+          {error && <FieldError>{error}</FieldError>}
         </div>
 
-        {/* Error */}
-        {error && <p className="text-sm text-[#EF4444] mt-6">{error}</p>}
-
-        {/* Actions */}
-        <div className="flex items-center gap-4 mt-8 pt-6 border-t border-[#E5E7EB]">
-          <button
-            onClick={handleSubmit}
-            disabled={createApplication.isPending}
-            className="bg-[#FF6B35] hover:bg-[#E85A2A] text-white text-sm font-semibold rounded-lg px-[22px] py-[11px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {createApplication.isPending ? "Saving..." : "Save Application"}
-          </button>
-          <button
-            onClick={() => router.back()}
-            className="text-sm font-medium text-[#6B7280] hover:text-[#111827] hover:underline transition-colors px-1 py-[11px]"
-          >
+        <div className="flex shrink-0 items-center justify-end gap-2.5 border-t border-line px-8 py-4">
+          <Button variant="outline" size="none" className="h-11 px-4 text-sm" onClick={close}>
             Cancel
-          </button>
+          </Button>
+          <Button size="cta" onClick={handleSubmit} disabled={createApplication.isPending}>
+            {!createApplication.isPending && <Check size={16} strokeWidth={2.6} />}
+            {createApplication.isPending ? "Saving..." : "Save application"}
+          </Button>
         </div>
-
-      </div>
-    </div>
+      </Modal>
+    </>
   )
 }

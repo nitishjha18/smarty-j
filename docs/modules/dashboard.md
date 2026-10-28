@@ -159,37 +159,29 @@ For the month being viewed, every `statusHistory` entry dated in that month mark
 
 ## 5. Sections in Render Order
 
-### Header band
+Layout and colors come from the shared design tokens in `frontend/app/globals.css` and the shared maps in `frontend/app/lib/status.ts` (`PIPELINE_STAGES`, `STATUS_LABELS`, `STATUS_STYLES`). `timeAgo` lives in `frontend/app/lib/dates.ts`.
 
-- Left: `Hello, {firstName}` and the subline `Here's your job search status for today.`. `firstName` is `user?.firstName`, then the first word of `user?.fullName`, then `there`.
-- Right: today's date in uppercase (`WEEKDAY, D MONTH YYYY`) and a summary line: `You have {n} application(s) tracked — {x} has/have had no update in 14+ days.` `n` comes from `stats?.totalApplications ?? 0`; `x` is `staleApps.length`. `has` is used when the count is one.
+### Header
+
+- Left: a time-of-day greeting, `Good morning|afternoon|evening, {firstName}` (hour before 12, before 18, otherwise evening), and a subline. `firstName` is `user?.firstName`, then the first word of `user?.fullName`, then `there`.
+- Subline: `{n} application(s) tracked — {x} has/have gone quiet →`. `n` is `stats?.totalApplications ?? 0` and `x` is `staleApps.length`. The orange `gone quiet` part links to the Gone quiet card (`#needs-attention`). With no stale applications it reads `none have gone quiet`. While loading it reads `Loading your status...`; on error it shows the API message in red; with zero applications it reads `You haven't added any applications yet.`
+- Right: a bordered date chip, for example `Thu, Oct 15`.
 
 ### Pipeline strip
 
-One cell per stage in the order `APPLIED`, `SCREENING`, `INTERVIEW`, `ASSIGNMENT`, `OFFER`, each showing the count and label.
+One cell per stage in the order `APPLIED`, `SCREENING`, `INTERVIEW`, `ASSIGNMENT`, `OFFER`: count, status dot and label, and a colored bar along the bottom edge. The whole strip links to `/applications`. There is no peak-stage highlight any more. `REJECTED` is excluded by design because it is a terminal state and does not belong in a morning briefing.
 
-- Peak stage: count and label in orange (`#FC8019`) with a full-strength top bar.
-- Other nonzero stages: dark gray text with a faint top bar.
-- Zero stages: light gray with no bar.
+### Empty state
 
-`REJECTED` is excluded by design because it is a terminal state and does not belong in a morning briefing.
+When the application list has loaded and is empty, the area below the strip shows `Add your first application` and an `Add application` button that links to `/applications/new`.
 
-### Three-column grid
+### Main area (12-column grid: calendar 8, right rail 4)
 
-Columns are sized `1fr 1.35fr 1fr`.
+**Activity calendar** (left). A month grid (Sunday first) with a `Today` button and previous/next month buttons. Every `statusHistory` entry in the viewed month appears as a chip with the company logo and name on its day (the status color tints the letter-avatar fallback). A day shows up to two chips and `+n more`. Clicking a day with activity opens a popover listing each change (`Company  Previous → New`) with an `Open →` link to the application. Today is a filled orange number on a tinted cell.
 
-**Recent Activity** (header note `Last 5 changes`). Each row shows the company logo (`CompanyLogo`, 28px), company name, job title, a colored badge for the status the application moved to, and `timeAgo(entry.createdAt)`. Empty state: `No activity yet.`
+**Gone quiet** (right rail, peach card, note `No reply after 14 days`). One row per stale application: whole days since `dateApplied` in large orange type, logo, company, job title, and a `Remind me` button that links to `/applications/{id}?tab=reminder` (the detail page opens on its Reminder tab). Empty state: `All applications are active.`
 
-Badge colors:
-
-| Status | Badge background |
-|---|---|
-| APPLIED | `#1D4ED8` |
-| SCREENING | `#92400E` |
-| INTERVIEW | `#6D28D9` |
-| ASSIGNMENT | `#C2410C` |
-| OFFER | `#15803D` |
-| REJECTED | `#9F1239` |
+**Recent activity** (right rail, `View all →` links to `/applications`). The newest five status changes as a timeline: company logo, company name (links to the application), `Previous → New` status, job title and `timeAgo(entry.createdAt)`. The previous status is derived client-side from the application's earlier history entry. Empty state: `No activity yet.`
 
 ```ts
 function timeAgo(dateStr: string) {
@@ -201,26 +193,24 @@ function timeAgo(dateStr: string) {
 }
 ```
 
-**Activity Calendar.** A month grid with previous and next month buttons. Today is filled orange. Days with status changes are tinted and show a small dot; hovering one shows a tooltip listing that day's changes. Tooltips open to the right, left, or centered depending on the column so they stay on screen. A legend explains Today and Activity.
-
-**Needs Attention** (header note `14+ days no update`). Each row shows the company logo (28px), company name, job title, and a red badge with the number of days since `dateApplied`. Empty state: `All applications are active.`
-
 ---
 
 ## 6. State Variables
 
 ```ts
+const [now] = useState(() => Date.now())
 const [calendarMonth, setCalendarMonth] = useState(() => new Date())
+const [openDay, setOpenDay] = useState<number | null>(null)
 ```
 
-`calendarMonth` is the only page state. Server data and its loading/error state come from the two query hooks.
+`now` is captured once so render stays pure (the stale-day arithmetic and the greeting use it). `calendarMonth` and `openDay` (the day whose popover is open) are the only other page state. Server data and its loading/error state come from the two query hooks.
 
 ---
 
 ## 7. Loading and Error States
 
-- On the first load, the header shows `Loading your status...`, pipeline counts show `0`, and the Recent Activity and Needs Attention cards show `Loading...`. Cached results stay rendered during a background refetch.
-- On error, the API error message is rendered in red in the header summary area.
+- On the first load, the subline shows `Loading your status...`, pipeline counts show `0`, and the Recent activity and Gone quiet cards show `Loading...`. Cached results stay rendered during a background refetch.
+- On error, the API error message is rendered in red in the header subline.
 
 ---
 
@@ -240,8 +230,8 @@ const [calendarMonth, setCalendarMonth] = useState(() => new Date())
 - The `Today` label in Recent Activity applies to every entry from the current 24-hour window regardless of time of day, so a status changed at 11pm and one at 1am can both show `Today`.
 - The stale threshold is hardcoded to 14 days on the client to match the backend definition. If the backend threshold changes, the client must be updated manually. The page does not use `stats.staleApplications`.
 - "Stale" is defined five different ways across the product: the backend stat (`APPLIED`, strictly more than 14 days), this page (`APPLIED`, whole days since `dateApplied` `>= 14`), the Applications header chip (`APPLIED`, elapsed time `>= 14` days), the Applications card badge (any status, days since the last status change), and the PRD ("no status change in fourteen plus days"). This page and the backend can differ by a day at the boundary. Known issue — see `docs/code-bugs.md` CB-04.
-- The summary line in the header says an application "has had no update in 14+ days", but the count only includes applications still in `APPLIED` status. An application that has moved on to another stage and then gone quiet is not counted.
+- The header subline and the Gone quiet card say applications have "gone quiet" ("no reply after 14 days"), but the count only includes applications still in `APPLIED` status. An application that has moved on to another stage and then gone quiet is not counted.
 - The stats fields other than `totalApplications` are fetched but unused.
 - The pipeline strip does not include `REJECTED`, so users cannot see their rejection count on the dashboard.
-- The calendar shows only status-change dates for the month being viewed.
+- The calendar shows only status-change dates for the month being viewed. A day with more than two changes shows `+n more`, and all of them are listed in its popover.
 - Applications without a stored `companyDomain` show a letter avatar in place of a logo.

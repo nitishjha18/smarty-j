@@ -1,4 +1,4 @@
-import { Check } from "lucide-react"
+import { Check, X } from "lucide-react"
 import type { ApplicationStatus } from "../../types"
 import { cn } from "../../lib/cn"
 import { PIPELINE_STAGES, STATUS_LABELS, STATUS_STYLES } from "../../lib/status"
@@ -6,34 +6,43 @@ import { PIPELINE_STAGES, STATUS_LABELS, STATUS_STYLES } from "../../lib/status"
 /**
  * Stage progress for the detail page: done stages filled with a check,
  * the current stage filled with a ring, later stages outlined.
- * Presentational only; pass `onSelect` to make stages clickable.
+ * For a rejected application pass `rejectedAt` (index into PIPELINE_STAGES of
+ * the last stage reached): that stage shows red with a cross, later ones stay empty.
+ * Pass `onSelect` to make stages clickable.
  */
 export default function Stepper({
   current,
+  rejectedAt,
   onSelect,
   disabled,
 }: {
   current: ApplicationStatus
+  rejectedAt?: number
   onSelect?: (status: ApplicationStatus) => void
   disabled?: boolean
 }) {
-  const currentIndex = PIPELINE_STAGES.indexOf(current)
+  const isRejected = rejectedAt !== undefined
+  const currentIndex = isRejected ? -1 : PIPELINE_STAGES.indexOf(current)
+  const reachedIndex = isRejected ? rejectedAt : currentIndex
 
   return (
-    <ol className="flex items-start">
+    <ol className="m-0 mt-1.5 grid list-none grid-cols-5 p-0">
       {PIPELINE_STAGES.map((stage, i) => {
-        const done = i < currentIndex
+        const done = i < reachedIndex
         const isCurrent = i === currentIndex
-        const s = STATUS_STYLES[stage]
+        const rejectedHere = isRejected && i === rejectedAt
+        const filled = done || isCurrent
         return (
-          <li key={stage} className="relative flex-1 flex flex-col items-center">
+          <li key={stage} className="relative flex justify-center">
             {i > 0 && (
               <span
                 aria-hidden="true"
                 className={cn(
-                  "absolute top-4 right-1/2 h-0.5 w-full -translate-y-1/2",
-                  i <= currentIndex
-                    ? STATUS_STYLES[PIPELINE_STAGES[i - 1]].dot
+                  "absolute left-[calc(-50%+14px)] top-[13px] h-0.5 w-[calc(100%-28px)]",
+                  i <= reachedIndex
+                    ? isRejected
+                      ? "bg-line-strong"
+                      : STATUS_STYLES[PIPELINE_STAGES[i - 1]].dot
                     : "bg-line-dashed"
                 )}
               />
@@ -47,19 +56,29 @@ export default function Stepper({
             >
               <span
                 className={cn(
-                  "size-8 rounded-full inline-flex items-center justify-center text-xs font-semibold",
-                  done || isCurrent
-                    ? cn(s.dot, "text-white")
-                    : "bg-surface border-[1.5px] border-line-strong text-muted",
+                  "inline-flex size-7 items-center justify-center rounded-full border-[1.5px] text-xs font-semibold leading-none",
+                  rejectedHere
+                    ? "border-st-rejected bg-st-rejected text-white"
+                    : filled
+                      ? cn(STATUS_STYLES[stage].dot, STATUS_STYLES[stage].border, "text-white")
+                      : "border-line-strong bg-surface text-muted",
                   isCurrent && "ring-4 ring-brand-tint"
                 )}
               >
-                {done ? <Check size={14} strokeWidth={3} /> : i + 1}
+                {rejectedHere ? (
+                  <X size={14} strokeWidth={3} />
+                ) : done ? (
+                  <Check size={14} strokeWidth={3} />
+                ) : (
+                  i + 1
+                )}
               </span>
               <span
                 className={cn(
                   "text-xs",
-                  isCurrent ? "font-semibold text-ink" : "font-medium text-muted"
+                  isCurrent || rejectedHere
+                    ? "font-semibold text-ink"
+                    : "font-medium text-muted"
                 )}
               >
                 {STATUS_LABELS[stage]}

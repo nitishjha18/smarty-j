@@ -1,14 +1,31 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
-import type {
-  Application,
-  ApplicationStatus,
-} from "../../../types"
+import {
+  Bell,
+  Check,
+  Copy,
+  Flag,
+  MoreVertical,
+  Pencil,
+  Trash2,
+  X,
+} from "lucide-react"
+import type { Application, ApplicationStatus } from "../../../types"
 import CompanyLogo from "../../../components/CompanyLogo"
 import Skeleton from "../../../components/Skeleton"
+import Button from "../../../components/ui/Button"
+import Chip, { Tag } from "../../../components/ui/Chip"
+import EmptyState from "../../../components/ui/EmptyState"
+import Eyebrow from "../../../components/ui/Eyebrow"
+import { FieldError, FieldHint, Input, Label, Textarea } from "../../../components/ui/Field"
+import Modal from "../../../components/ui/Modal"
+import ScoreMeter, { ScoreBar } from "../../../components/ui/ScoreMeter"
+import Stepper from "../../../components/ui/Stepper"
+import { StatusDot, StatusLabel, StatusTransition } from "../../../components/ui/StatusBadge"
+import Tabs from "../../../components/ui/Tabs"
 import {
   useAnalyzeResume,
   useApplication,
@@ -17,100 +34,34 @@ import {
   useResumeAnalysis,
   useUpdateApplication,
 } from "../../../lib/queries"
+import { cn } from "../../../lib/cn"
+import {
+  daysSince,
+  daysSinceLastStatusChange,
+  formatDateTime,
+  formatDateUS,
+} from "../../../lib/dates"
+import { PIPELINE_STAGES, SOURCE_LABELS } from "../../../lib/status"
+import ApplicationsPage from "../page"
 
-// ─── Label Maps ───────────────────────────────────────────────────────────────
+type TabValue = "overview" | "ai" | "reminder"
 
-const STATUS_LABELS: Record<ApplicationStatus, string> = {
-  APPLIED: "Applied",
-  SCREENING: "Screening",
-  INTERVIEW: "Interview",
-  ASSIGNMENT: "Assignment",
-  OFFER: "Offer",
-  REJECTED: "Rejected",
-}
-
-// Solid badge colors — used for the header status badge and the history timeline.
-// Matches the mockup's --s-* design tokens exactly.
-const STATUS_COLORS: Record<ApplicationStatus, string> = {
-  APPLIED: "bg-[#1D4ED8] text-white",
-  SCREENING: "bg-[#92400E] text-white",
-  INTERVIEW: "bg-[#6D28D9] text-white",
-  ASSIGNMENT: "bg-[#C2410C] text-white",
-  OFFER: "bg-[#15803D] text-white",
-  REJECTED: "bg-[#9F1239] text-white",
-}
-
-// Bare hex of the same tokens, for places that need a text color rather than a badge
-// (pipeline dots, "Current stage" value in the Details card).
-const STATUS_HEX: Record<ApplicationStatus, string> = {
-  APPLIED: "#1D4ED8",
-  SCREENING: "#92400E",
-  INTERVIEW: "#6D28D9",
-  ASSIGNMENT: "#C2410C",
-  OFFER: "#15803D",
-  REJECTED: "#9F1239",
-}
-
-// Light-wash pill colors — used for the clickable "change status" pills.
-const STATUS_PILL_ACTIVE: Record<ApplicationStatus, string> = {
-  APPLIED: "bg-[#EFF6FF] text-[#1D4ED8] border-[#BFDBFE]",
-  SCREENING: "bg-[#FFFBEB] text-[#92400E] border-[#FDE68A]",
-  INTERVIEW: "bg-[#F5F3FF] text-[#6D28D9] border-[#DDD6FE]",
-  ASSIGNMENT: "bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA]",
-  OFFER: "bg-[#F0FDF4] text-[#15803D] border-[#BBF7D0]",
-  REJECTED: "bg-[#FFF1F2] text-[#9F1239] border-[#FECDD3]",
-}
-
-const SOURCE_LABELS: Record<string, string> = {
-  LINKED_IN: "LinkedIn",
-  NAUKARI: "Naukri",
-  REFERAL: "Referral",
-  COLDEMAIL: "Cold Email",
-  SOCIAL_MEDIA: "Social Media",
-  OTHER_JOB_APPS: "Other",
-}
-
-const ALL_STATUSES: ApplicationStatus[] = [
-  "APPLIED",
-  "SCREENING",
-  "INTERVIEW",
-  "ASSIGNMENT",
-  "OFFER",
-  "REJECTED",
-]
-
-// The pipeline stepper only tracks the "forward" path — Rejected is a branch,
-// not a stage, so it's surfaced via the status pills / history instead.
-const PIPELINE_STATUSES: ApplicationStatus[] = [
-  "APPLIED",
-  "SCREENING",
-  "INTERVIEW",
-  "ASSIGNMENT",
-  "OFFER",
+const TABS: { value: TabValue; label: string }[] = [
+  { value: "overview", label: "Overview" },
+  { value: "ai", label: "AI Resume Fit" },
+  { value: "reminder", label: "Reminder" },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  })
-}
-
-function daysSince(dateStr: string) {
-  const then = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.setHours(0, 0, 0, 0) - new Date(then).setHours(0, 0, 0, 0)
-  const days = Math.max(0, Math.round(diffMs / 86400000))
-  if (days === 0) return "Today"
-  if (days === 1) return "1 day ago"
-  return `${days} days ago`
-}
-
 function toISODate(date: Date) {
   return date.toISOString().split("T")[0]
+}
+
+function inDays(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  return toISODate(d)
 }
 
 function scoreLabel(score: number) {
@@ -119,142 +70,30 @@ function scoreLabel(score: number) {
   return "Needs work to close the gap"
 }
 
-// ─── Small presentational pieces ───────────────────────────────────────────────
-
-function CheckIcon({ size = 11 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  )
+function scoreTag(score: number) {
+  if (score >= 85) return "STRONG"
+  if (score >= 65) return "GOOD"
+  return "NEEDS WORK"
 }
 
-function CrossIcon({ size = 11 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
+// Rejected is a branch, not a stage: the stepper shows the last stage reached
+// (from statusHistory) in the red "rejected" state.
+function rejectedStageIndex(application: Application) {
+  const sorted = [...(application.statusHistory ?? [])].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   )
+  const lastNonRejected = [...sorted].reverse().find((h) => h.status !== "REJECTED")
+  return lastNonRejected ? Math.max(0, PIPELINE_STAGES.indexOf(lastNonRejected.status)) : 0
 }
 
-// ─── Pipeline Stepper ───────────────────────────────────────────────────────────
-// Renders the 5-stage forward pipeline. When the application is REJECTED, the
-// step matching the applicant's last stage before rejection (from statusHistory)
-// is shown in the "rejected" red state; everything after stays empty.
-
-function PipelineStepper({ application }: { application: Application }) {
-  let activeIndex = PIPELINE_STATUSES.indexOf(application.status)
-  let rejectedAt = -1
-
-  if (application.status === "REJECTED") {
-    const sorted = [...(application.statusHistory ?? [])].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    )
-    const lastNonRejected = [...sorted].reverse().find((h) => h.status !== "REJECTED")
-    rejectedAt = lastNonRejected ? PIPELINE_STATUSES.indexOf(lastNonRejected.status) : 0
-    activeIndex = -1
-  }
-
-  return (
-    <div className="flex items-center gap-0 relative">
-      {PIPELINE_STATUSES.map((status, index) => {
-        const isDone = activeIndex > -1 && index < activeIndex
-        const isActive = activeIndex > -1 && index === activeIndex
-        const isRejectedHere = rejectedAt === index
-        const lineFilled = isDone || isActive || (rejectedAt > -1 && index < rejectedAt) || isRejectedHere
-        const isLast = index === PIPELINE_STATUSES.length - 1
-
-        return (
-          <div key={status} className="flex flex-col items-center flex-1 relative">
-            {!isLast && (
-              <div
-                className={`absolute top-[13px] left-1/2 w-full h-[2px] z-0 ${
-                  lineFilled ? "bg-[#FF6B35]" : "bg-[#E5E7EB]"
-                }`}
-              />
-            )}
-            <div
-              className={`w-[26px] h-[26px] rounded-full border-2 flex items-center justify-center relative z-10 flex-shrink-0 ${
-                isDone
-                  ? "bg-[#FF6B35] border-[#FF6B35] text-white"
-                  : isActive
-                  ? "bg-white border-[#FF6B35] text-[#FF6B35] shadow-[0_0_0_4px_rgba(255,107,53,0.12)]"
-                  : isRejectedHere
-                  ? "bg-[#9F1239] border-[#9F1239] text-white"
-                  : "bg-white border-[#E5E7EB] text-[#9CA3AF]"
-              }`}
-            >
-              {isDone && <CheckIcon />}
-              {isActive && <span className="w-[8px] h-[8px] rounded-full bg-[#FF6B35]" />}
-              {isRejectedHere && <CrossIcon />}
-              {!isDone && !isActive && !isRejectedHere && (
-                <span className="w-[9px] h-[9px] rounded-full border-2 border-[#9CA3AF]" />
-              )}
-            </div>
-            <span
-              className={`mt-[7px] text-[10.5px] font-medium text-center whitespace-nowrap ${
-                isActive
-                  ? "text-[#FF6B35] font-semibold"
-                  : isDone
-                  ? "text-[#6B7280]"
-                  : isRejectedHere
-                  ? "text-[#9F1239] font-semibold"
-                  : "text-[#9CA3AF]"
-              }`}
-            >
-              {STATUS_LABELS[status]}
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ─── Job description modal ──────────────────────────────────────────────────────
-
-function JobDescriptionModal({
-  jobDescription,
-  onClose,
-}: {
-  jobDescription: string
-  onClose: () => void
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl max-h-[80vh] bg-white rounded-[14px] shadow-[0_20px_60px_rgba(0,0,0,0.18)] flex flex-col"
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0F1F4] flex-shrink-0">
-          <h3 className="text-[15px] font-semibold text-gray-900">Job description</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-700 text-xl leading-none px-1"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-        <div className="px-6 py-5 overflow-y-auto">
-          <pre className="text-[13px] text-[#374151] whitespace-pre-wrap font-sans leading-[1.65]">
-            {jobDescription}
-          </pre>
-        </div>
-      </div>
-    </div>
-  )
-}
+const SECTION_DIVIDER = "mt-5 border-t border-line pt-5"
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ApplicationDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const applicationQuery = useApplication(id)
   const analysisQuery = useResumeAnalysis(id)
   const updateApplication = useUpdateApplication(id)
@@ -265,17 +104,20 @@ export default function ApplicationDetailPage() {
   const loading = applicationQuery.isPending
   const savedAnalysis = analysisQuery.isError ? null : analysisQuery.data ?? null
   const loadingAnalysis = analysisQuery.isPending
+  const [now] = useState(() => Date.now())
 
   // ── Tab / UI-only state ──
-  const [activeTab, setActiveTab] = useState<"overview" | "ai" | "reminder">("overview")
+  const [activeTab, setActiveTab] = useState<TabValue>(() => {
+    const requested = searchParams.get("tab")
+    return TABS.some((t) => t.value === requested) ? (requested as TabValue) : "overview"
+  })
   const [overflowOpen, setOverflowOpen] = useState(false)
   const [jdModalOpen, setJdModalOpen] = useState(false)
   const overflowRef = useRef<HTMLDivElement>(null)
 
-  // ── Core application state ──
-
   // ── Notes state ──
   const [notes, setNotes] = useState("")
+  const [notesInitFor, setNotesInitFor] = useState<string | null>(null)
   const [notesSaved, setNotesSaved] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const error = applicationQuery.error?.message ?? actionError
@@ -288,8 +130,6 @@ export default function ApplicationDetailPage() {
 
   // ── Resume analysis state ──
   const [analysisError, setAnalysisError] = useState<string | null>(null)
-
-  // ─── AI Resume Fit state ──────────────────────────────────────────────────────
   const [copied, setCopied] = useState(false)
 
   // ── Reminder state ──
@@ -297,7 +137,12 @@ export default function ApplicationDetailPage() {
   const [reminderNotes, setReminderNotes] = useState("")
   const [reminderSaved, setReminderSaved] = useState(false)
   const [reminderError, setReminderError] = useState<string | null>(null)
-  const initializedNotesApplicationId = useRef<string | null>(null)
+
+  // Initialize the notes editor once per application, so a refetch never replaces typing.
+  if (application && notesInitFor !== application.id) {
+    setNotesInitFor(application.id)
+    setNotes(application.notes ?? "")
+  }
 
   // ─── Close overflow menu on outside click ──────────────────────────────────
 
@@ -310,13 +155,6 @@ export default function ApplicationDetailPage() {
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
-
-  useEffect(() => {
-    if (!application || initializedNotesApplicationId.current === application.id) return
-    initializedNotesApplicationId.current = application.id
-    setNotes(application.notes ?? "")
-  }, [application])
-
 
   // ─── Status update ────────────────────────────────────────────────────────
 
@@ -384,9 +222,9 @@ export default function ApplicationDetailPage() {
     }
   }
 
-  const handleCopyPrompt = () => {
-    if (!savedAnalysis || !application) return
-    const prompt = `I applied for a ${application.jobTitle} role at ${application.companyName}. My resume was analysed and here is what came back:
+  const improvementPrompt =
+    savedAnalysis && application
+      ? `I applied for a ${application.jobTitle} role at ${application.companyName}. My resume was analysed and here is what came back:
 
 Match Score: ${savedAnalysis.matchScore}/100
 Missing Keywords: ${savedAnalysis.missingKeywords.join(", ")}
@@ -395,12 +233,14 @@ Strongest Points: ${savedAnalysis.strongestPoints.join(", ")}
 Recruiter Take: ${savedAnalysis.recruiterTake}
 
 Please help me improve my resume to address these gaps.`
+      : ""
 
-    navigator.clipboard.writeText(prompt)
+  const handleCopyPrompt = () => {
+    if (!savedAnalysis || !application) return
+    navigator.clipboard.writeText(improvementPrompt)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
-
 
   // ─── Create Reminder ──────────────────────────────────────────────────────
 
@@ -427,11 +267,37 @@ Please help me improve my resume to address these gaps.`
     }
   }
 
+  const pickReminderDate = (value: string) => {
+    setReminderDate(value)
+    setReminderSaved(false)
+    setReminderError(null)
+  }
+
+  // ─── Render: modal frame ──────────────────────────────────────────────────
+
+  const close = () => router.push("/applications")
+  const frame = (content: React.ReactNode, escape = true) => (
+    <>
+      {/* The board stays visible behind the dialog, like the design. */}
+      <ApplicationsPage />
+      <Modal
+        onClose={close}
+        size="lg"
+        label="Application details"
+        showClose={false}
+        closeOnEscape={escape}
+        className="flex h-[min(820px,calc(100vh-48px))] flex-col overflow-hidden"
+      >
+        {content}
+      </Modal>
+    </>
+  )
+
   // ─── Render: loading / error ──────────────────────────────────────────────
 
   if (loading) {
-    return (
-      <div className="p-8 flex flex-col gap-5">
+    return frame(
+      <div className="flex flex-col gap-5 p-8">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-28 w-full" />
         <Skeleton className="h-72 w-full" />
@@ -440,15 +306,11 @@ Please help me improve my resume to address these gaps.`
   }
 
   if (error && !application) {
-    return (
-      <div className="p-8 text-red-500">{error}</div>
-    )
+    return frame(<div className="p-8 text-danger">{error}</div>)
   }
 
   if (!application) {
-    return (
-      <div className="p-8 text-gray-500">Application not found.</div>
-    )
+    return frame(<div className="p-8 text-muted">Application not found.</div>)
   }
 
   const notesChanged = notes !== (application.notes ?? "")
@@ -457,577 +319,419 @@ Please help me improve my resume to address these gaps.`
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       )
     : []
+  const quietDays = daysSinceLastStatusChange(application, now)
+  const isQuiet = quietDays >= 14
+  const isRejected = application.status === "REJECTED"
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
-  return (
-    <div className="flex flex-col min-h-screen -m-8">
-
+  return frame(
+    <>
       {/* Delete confirmation modal */}
       {confirmDelete && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
-          onClick={() => !deleteApplication.isPending && setConfirmDelete(false)}
+        <Modal
+          size="sm"
+          label="Delete application"
+          showClose={false}
+          onClose={() => !deleteApplication.isPending && setConfirmDelete(false)}
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[380px] bg-white rounded-[14px] shadow-[0_20px_60px_rgba(0,0,0,0.18)] p-7"
-          >
-            <div className="w-11 h-11 rounded-full bg-[#FEF2F2] flex items-center justify-center mb-4 text-[#DC2626]">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                <path d="M10 11v6M14 11v6" />
-                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-              </svg>
+          <div className="p-7">
+            <div className="mb-4 flex size-11 items-center justify-center rounded-full bg-danger-tint text-danger">
+              <Trash2 size={20} />
             </div>
-            <h3 className="text-base font-bold text-gray-900 mb-2">Delete this application?</h3>
-            <p className="text-[13.5px] text-gray-500 leading-relaxed mb-6">
-              This will permanently remove {application.companyName} — {application.jobTitle} from your
-              tracker. This action cannot be undone.
+            <h3 className="m-0 mb-2 text-base font-semibold">Delete this application?</h3>
+            <p className="m-0 mb-6 text-sm2 leading-relaxed text-body">
+              This will permanently remove {application.companyName} — {application.jobTitle} from
+              your tracker. This action cannot be undone.
             </p>
             <div className="flex items-center justify-end gap-2.5">
-              <button
+              <Button
+                variant="outline"
                 onClick={() => setConfirmDelete(false)}
                 disabled={deleteApplication.isPending}
-                className="text-sm px-4 py-2 rounded-[6px] text-gray-500 border border-[#E5E7EB] hover:bg-gray-50 disabled:opacity-50"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="danger"
                 onClick={handleDelete}
                 disabled={deleteApplication.isPending}
-                className="text-sm font-semibold px-4 py-2 rounded-[6px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
               >
                 {deleteApplication.isPending ? "Deleting..." : "Yes, delete"}
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Job description modal */}
       {jdModalOpen && application.jobDescription && (
-        <JobDescriptionModal
-          jobDescription={application.jobDescription}
-          onClose={() => setJdModalOpen(false)}
-        />
+        <Modal size="md" label="Job description" onClose={() => setJdModalOpen(false)}>
+          <div className="flex max-h-[80vh] flex-col">
+            <div className="shrink-0 border-b border-line px-6 py-4">
+              <h3 className="m-0 text-[15px] font-semibold">Job description</h3>
+            </div>
+            <div className="overflow-y-auto px-6 py-5">
+              <pre className="m-0 whitespace-pre-wrap font-sans text-sm2 leading-[1.65] text-body">
+                {application.jobDescription}
+              </pre>
+            </div>
+          </div>
+        </Modal>
       )}
 
-      {/* ── Sticky header ─────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 bg-white border-b border-[#E5E7EB] px-8 h-[58px] flex items-center gap-4 flex-shrink-0">
-        <Link
-          href="/applications"
-          className="flex items-center gap-1.5 text-[13px] font-medium text-gray-500 hover:text-gray-900 flex-shrink-0 transition-colors"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-          Applications
-        </Link>
-        <div className="w-px h-[18px] bg-[#E5E7EB] flex-shrink-0" />
-        <div className="flex items-center gap-2.5">
-          <CompanyLogo domain={application.companyDomain} name={application.companyName} size={26} />
-          <span className="text-[15px] font-semibold text-gray-900">{application.companyName}</span>
-        </div>
-        <span className="text-[13px] text-gray-500">{application.jobTitle}</span>
-        <div
-          className={`inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2.5 py-[3px] rounded-full text-white flex-shrink-0 ${STATUS_COLORS[application.status]}`}
-        >
-          <span className="w-[5px] h-[5px] rounded-full bg-white/65" />
-          {STATUS_LABELS[application.status]}
-        </div>
+      {/* ── Header ────────────────────────────────────────────────────────── */}
+      <header className="shrink-0 px-8 pt-7">
+        <div className="flex items-start gap-3.5">
+          <CompanyLogo
+            domain={application.companyDomain}
+            name={application.companyName}
+            size={44}
+            tone={application.status}
+          />
+          <div className="min-w-0 flex-1">
+            <h1 className="m-0 truncate text-2xl font-semibold leading-[1.2] tracking-[-0.03em]">
+              {application.companyName}
+            </h1>
+            <p className="m-0 mt-0.5 text-[15px] text-body">{application.jobTitle}</p>
+            <p className="m-0 mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-mono uppercase tracking-[0.06em] text-muted">
+              <StatusLabel status={application.status} className="text-ink" />
+              <span aria-hidden="true">·</span>
+              <span>{SOURCE_LABELS[application.source]}</span>
+              <span aria-hidden="true">·</span>
+              <span>Applied {formatDateUS(application.dateApplied)}</span>
+              <span aria-hidden="true">·</span>
+              {isQuiet ? (
+                <span className="text-brand">Quiet {quietDays} days</span>
+              ) : (
+                <span>{daysSince(application.dateApplied)}</span>
+              )}
+            </p>
+          </div>
 
-        <div className="ml-auto flex items-center gap-2" ref={overflowRef}>
-          <div className="relative">
+          <div ref={overflowRef} className="relative flex items-center gap-1">
             <button
+              type="button"
               onClick={() => setOverflowOpen((o) => !o)}
-              className="w-8 h-8 rounded-[6px] border border-[#E5E7EB] flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+              className="inline-flex size-8 items-center justify-center rounded-ctl text-ink transition-colors hover:bg-surface-hover"
               aria-label="More actions"
+              aria-haspopup="menu"
+              aria-expanded={overflowOpen}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="5" r="1.5" />
-                <circle cx="12" cy="12" r="1.5" />
-                <circle cx="12" cy="19" r="1.5" />
-              </svg>
+              <MoreVertical size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={close}
+              aria-label="Close"
+              className="inline-flex size-8 items-center justify-center rounded-ctl text-ink transition-colors hover:bg-surface-hover"
+            >
+              <X size={18} />
             </button>
             {overflowOpen && (
-              <div className="absolute top-[calc(100%+6px)] right-0 bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_4px_16px_rgba(0,0,0,0.09),0_1px_4px_rgba(0,0,0,0.05)] min-w-[160px] overflow-hidden z-50">
+              <div
+                role="menu"
+                className="absolute right-9 top-[38px] z-50 min-w-[200px] rounded-btn bg-surface p-1 shadow-[0_0_0_1px_var(--color-line),0_8px_24px_rgba(23,23,23,0.12)]"
+              >
                 <button
+                  type="button"
+                  role="menuitem"
                   disabled
                   title="Coming soon"
-                  className="w-full flex items-center gap-2 px-3.5 py-2.5 text-[13px] font-medium text-gray-300 cursor-not-allowed text-left"
+                  className="flex h-9 w-full cursor-not-allowed items-center gap-2 rounded-chip px-2.5 text-left text-sm2 font-medium text-faint"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
+                  <Pencil size={14} />
                   Edit details
-                  <span className="ml-auto text-[10px] text-gray-300">Soon</span>
+                  <span className="ml-auto text-micro text-faint">Soon</span>
                 </button>
                 <button
+                  type="button"
+                  role="menuitem"
                   onClick={() => {
                     setOverflowOpen(false)
                     setConfirmDelete(true)
                   }}
-                  className="w-full flex items-center gap-2 px-3.5 py-2.5 text-[13px] font-medium text-red-600 hover:bg-red-50 text-left transition-colors"
+                  className="flex h-9 w-full items-center gap-2 rounded-chip px-2.5 text-left text-sm2 font-medium text-danger transition-colors hover:bg-surface-hover"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                    <path d="M10 11v6M14 11v6" />
-                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                  </svg>
+                  <Trash2 size={14} />
                   Delete
                 </button>
               </div>
             )}
           </div>
         </div>
+
+        <Tabs tabs={TABS} value={activeTab} onChange={setActiveTab} className="mt-[22px]" />
       </header>
 
-      {/* ── Tabs bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-0.5 px-8 pt-3 bg-white border-b border-[#E5E7EB] flex-shrink-0">
-        <button
-          onClick={() => setActiveTab("overview")}
-          className={`px-4 pt-2 pb-[11px] text-[13.5px] -mb-px border-b-2 transition-colors ${
-            activeTab === "overview"
-              ? "text-[#FF6B35] font-semibold border-[#FF6B35]"
-              : "text-gray-500 font-medium border-transparent hover:text-gray-900"
-          }`}
-        >
-          Overview
-        </button>
-        <button
-          onClick={() => setActiveTab("ai")}
-          className={`px-4 pt-2 pb-[11px] text-[13.5px] -mb-px border-b-2 transition-colors ${
-            activeTab === "ai"
-              ? "text-[#FF6B35] font-semibold border-[#FF6B35]"
-              : "text-gray-500 font-medium border-transparent hover:text-gray-900"
-          }`}
-        >
-          AI Resume Fit
-        </button>
-        <button
-          onClick={() => setActiveTab("reminder")}
-          className={`px-4 pt-2 pb-[11px] text-[13.5px] -mb-px border-b-2 transition-colors ${
-            activeTab === "reminder"
-              ? "text-[#FF6B35] font-semibold border-[#FF6B35]"
-              : "text-gray-500 font-medium border-transparent hover:text-gray-900"
-          }`}
-        >
-          Reminder
-        </button>
-      </div>
-
-      {/* ── Page body ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 px-8 py-7 pb-12">
-
+      {/* ── Body ──────────────────────────────────────────────────────────── */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-8 pt-6">
         {/* Inline error banner (status/notes/delete errors that don't kill the page) */}
         {error && (
-          <div className="mb-4 bg-[#FEF2F2] border border-[#FECACA] rounded-[6px] px-3.5 py-2.5 text-sm text-red-600">
+          <div className="mb-4 rounded-ctl border border-danger/30 bg-danger-tint px-3.5 py-2.5 text-sm text-danger">
             {error}
           </div>
         )}
 
         {/* ════════════════ OVERVIEW TAB ════════════════ */}
         {activeTab === "overview" && (
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5 items-start">
-
-            {/* Left column */}
-            <div>
-              {/* Company card */}
-              <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07),0_1px_2px_rgba(0,0,0,0.04)] mb-4">
-
-                <div className="px-[22px] pt-[22px] pb-5 border-b border-[#F0F1F4]">
-                  <div className="flex items-center gap-3.5 mb-3">
-                    <CompanyLogo domain={application.companyDomain} name={application.companyName} size={44} />
-                    <div>
-                      <div className="text-xl font-bold text-gray-900 tracking-tight">{application.companyName}</div>
-                      <div className="text-sm text-gray-500 mt-0.5">{application.jobTitle}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 bg-[#F3F4F6] border border-[#E5E7EB] px-2.5 py-[3px] rounded-full">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                        <circle cx="9" cy="7" r="4" />
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                      </svg>
-                      {SOURCE_LABELS[application.source]}
+          <div className="flex flex-col gap-6">
+            <section>
+              <div className="mb-2.5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Eyebrow>Stage</Eyebrow>
+                  {statusUpdated && (
+                    <span role="status" className="font-mono text-mono tracking-[0.06em] text-success">
+                      Updated
                     </span>
-                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 bg-[#F3F4F6] border border-[#E5E7EB] px-2.5 py-[3px] rounded-full">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
-                        <rect x="3" y="4" width="18" height="18" rx="2" />
-                        <line x1="16" y1="2" x2="16" y2="6" />
-                        <line x1="8" y1="2" x2="8" y2="6" />
-                        <line x1="3" y1="10" x2="21" y2="10" />
-                      </svg>
-                      Applied {formatDate(application.dateApplied)}
-                    </span>
-                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 bg-[#F3F4F6] border border-[#E5E7EB] px-2.5 py-[3px] rounded-full">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                      {daysSince(application.dateApplied)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Pipeline */}
-                <div className="px-[22px] py-5">
-                  <div className="flex items-center justify-between mb-3.5">
-                    <div className="text-[11px] font-semibold text-gray-400 tracking-wide uppercase">Pipeline</div>
-                    {statusUpdated && <span className="text-[13px] text-[#15803D] font-medium">Updated</span>}
-                  </div>
-                  <PipelineStepper application={application} />
-
-                  {/* Clickable status pills */}
-                  <div className="flex flex-wrap gap-1.5 mt-4 pt-4 border-t border-[#F0F1F4]">
-                    {ALL_STATUSES.map((status) => (
-                      <button
-                        key={status}
-                        onClick={() => handleStatusChange(status)}
-                        disabled={updateApplication.isPending}
-                        className={`px-3 py-1 rounded-full text-xs font-medium border-[1.5px] transition-all disabled:opacity-50 ${
-                          application.status === status
-                            ? STATUS_PILL_ACTIVE[status]
-                            : "bg-[#F3F4F6] text-gray-500 border-transparent hover:border-[#E5E7EB] hover:text-gray-900"
-                        }`}
-                      >
-                        {STATUS_LABELS[status]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* History */}
-                {sortedHistory.length > 0 && (
-                  <div className="px-[22px] py-5 border-t border-[#F0F1F4]">
-                    <div className="text-[11px] font-semibold text-gray-400 tracking-wide uppercase mb-3">
-                      Status history
-                    </div>
-                    <div className="flex flex-col">
-                      {sortedHistory.map((entry, index) => (
-                        <div key={entry.id} className="flex items-start gap-3 relative pb-3.5 last:pb-0">
-                          <div className="flex flex-col items-center flex-shrink-0">
-                            <span
-                              className={`rounded-full mt-1 flex-shrink-0 ${
-                                index === 0 ? "w-[10px] h-[10px] bg-[#FF6B35] mt-1" : "w-2 h-2 bg-[#E5E7EB] mt-[5px]"
-                              }`}
-                            />
-                            {index < sortedHistory.length - 1 && (
-                              <div className="w-px bg-[#E5E7EB] flex-1 min-h-[18px] mt-1" />
-                            )}
-                          </div>
-                          <div className="flex items-center justify-between w-full">
-                            <span
-                              className={`inline-flex items-center text-[11.5px] font-semibold px-2 py-0.5 rounded-full text-white ${STATUS_COLORS[entry.status]}`}
-                            >
-                              {STATUS_LABELS[entry.status]}
-                            </span>
-                            <span className="text-[11.5px] text-gray-400">{formatDate(entry.createdAt)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Notes */}
-              <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07),0_1px_2px_rgba(0,0,0,0.04)] overflow-hidden">
-                <div className="px-[18px] pt-3.5 pb-3 border-b border-[#F0F1F4]">
-                  <span className="text-[13px] font-semibold text-gray-900">Notes</span>
-                </div>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={4}
-                  placeholder="Add notes, links, contacts, anything useful about this application…"
-                  className="w-full min-h-[110px] px-4 py-3.5 text-[13.5px] text-gray-900 resize-y outline-none leading-relaxed"
-                />
-                <div className="flex items-center justify-end gap-2.5 px-3.5 py-2.5 border-t border-[#F0F1F4] bg-[#FAFAFA] rounded-b-[10px]">
-                  {notesSaved && !notesChanged && (
-                    <span className="text-[12.5px] text-[#15803D] font-medium">Saved</span>
                   )}
+                </div>
+                <div className="flex items-center gap-3">
+                  {!isRejected && (
+                    <button
+                      type="button"
+                      onClick={() => handleStatusChange("REJECTED")}
+                      disabled={updateApplication.isPending}
+                      className="inline-flex items-center gap-1.5 py-1 text-sm2 font-medium text-body transition-colors hover:text-ink disabled:opacity-50"
+                    >
+                      <StatusDot status="REJECTED" />
+                      Mark as rejected
+                    </button>
+                  )}
+                </div>
+              </div>
+              <Stepper
+                current={application.status}
+                rejectedAt={isRejected ? rejectedStageIndex(application) : undefined}
+                onSelect={handleStatusChange}
+                disabled={updateApplication.isPending}
+              />
+            </section>
+
+            <section>
+              <Eyebrow className="mb-2.5">Notes</Eyebrow>
+              <Textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={4}
+                placeholder="Add notes, links, contacts, anything useful about this application…"
+                className="min-h-[120px] text-sm"
+              />
+              <div className="mt-2.5 flex items-center justify-end gap-2.5">
+                {notesSaved && !notesChanged && (
+                  <span role="status" className="font-mono text-mono tracking-[0.06em] text-success">
+                    Saved
+                  </span>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleSaveNotes}
+                  disabled={!notesChanged || updateApplication.isPending}
+                >
+                  {updateApplication.isPending ? "Saving..." : "Save notes"}
+                </Button>
+              </div>
+            </section>
+
+            {application.jobDescription && (
+              <section>
+                <div className="mb-2.5 flex items-center justify-between">
+                  <Eyebrow>Job description</Eyebrow>
                   <button
-                    onClick={handleSaveNotes}
-                    disabled={!notesChanged || updateApplication.isPending}
-                    className="text-[13px] font-semibold px-4 py-[7px] bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] transition-colors"
+                    type="button"
+                    onClick={() => setJdModalOpen(true)}
+                    className="text-sm2 font-medium text-body transition-colors hover:text-ink"
                   >
-                    {updateApplication.isPending ? "Saving..." : "Save notes"}
+                    Expand
                   </button>
                 </div>
-              </div>
-            </div>
-
-            {/* Right column */}
-            <div className="flex flex-col gap-4">
-              {/* Details */}
-              <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07),0_1px_2px_rgba(0,0,0,0.04)]">
-                <div className="px-[18px] pt-3.5 pb-3 border-b border-[#F0F1F4]">
-                  <span className="text-[13px] font-semibold text-gray-900">Details</span>
+                <div className="max-h-[200px] overflow-y-auto">
+                  <pre className="m-0 whitespace-pre-wrap font-sans text-sm leading-[1.6] text-body">
+                    {application.jobDescription}
+                  </pre>
                 </div>
-                <div className="p-[18px] flex flex-col gap-3">
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-7 h-7 rounded-[6px] bg-[#F3F4F6] border border-[#E5E7EB] flex items-center justify-center flex-shrink-0 text-gray-500">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                        <circle cx="9" cy="7" r="4" />
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400 font-medium mb-px">Source</div>
-                      <div className="text-[13px] text-gray-900 font-medium">{SOURCE_LABELS[application.source]}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-7 h-7 rounded-[6px] bg-[#F3F4F6] border border-[#E5E7EB] flex items-center justify-center flex-shrink-0 text-gray-500">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="3" y="4" width="18" height="18" rx="2" />
-                        <line x1="16" y1="2" x2="16" y2="6" />
-                        <line x1="8" y1="2" x2="8" y2="6" />
-                        <line x1="3" y1="10" x2="21" y2="10" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400 font-medium mb-px">Applied on</div>
-                      <div className="text-[13px] text-gray-900 font-medium">{formatDate(application.dateApplied)}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-7 h-7 rounded-[6px] bg-[#F3F4F6] border border-[#E5E7EB] flex items-center justify-center flex-shrink-0 text-gray-500">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400 font-medium mb-px">Days since applied</div>
-                      <div className="text-[13px] text-gray-900 font-medium">{daysSince(application.dateApplied)}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-7 h-7 rounded-[6px] bg-[#F3F4F6] border border-[#E5E7EB] flex items-center justify-center flex-shrink-0 text-gray-500">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                        <polyline points="22 4 12 14.01 9 11.01" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400 font-medium mb-px">Current stage</div>
-                      <div
-                        className="text-[13px] font-semibold"
-                        style={{ color: STATUS_HEX[application.status] }}
-                      >
-                        {STATUS_LABELS[application.status]}
+              </section>
+            )}
+
+            {sortedHistory.length > 0 && (
+              <section>
+                <Eyebrow className="mb-3">Status history</Eyebrow>
+                <ol className="m-0 flex list-none flex-col p-0">
+                  {sortedHistory.map((entry, index) => (
+                    <li key={entry.id} className="relative flex min-h-12 gap-3 pb-2.5">
+                      {index < sortedHistory.length - 1 && (
+                        <span
+                          aria-hidden="true"
+                          className="absolute bottom-0 left-[9.5px] top-[22px] w-px bg-line"
+                        />
+                      )}
+                      <CompanyLogo
+                        domain={application.companyDomain}
+                        name={application.companyName}
+                        size={20}
+                        tone={entry.status}
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm leading-[22px]">
+                          <StatusTransition
+                            from={sortedHistory[index + 1]?.status ?? null}
+                            to={entry.status}
+                            size="sm"
+                          />
+                        </div>
+                        <div className="mt-0.5 font-mono text-mono tracking-[0.04em] text-muted">
+                          {formatDateTime(entry.createdAt)}
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Job description */}
-              {application.jobDescription && (
-                <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07),0_1px_2px_rgba(0,0,0,0.04)]">
-                  <div className="px-[18px] pt-3.5 pb-3 border-b border-[#F0F1F4] flex items-center justify-between">
-                    <span className="text-[13px] font-semibold text-gray-900">Job description</span>
-                    <button
-                      onClick={() => setJdModalOpen(true)}
-                      className="flex items-center gap-1 text-xs font-semibold text-gray-500 border border-[#E5E7EB] rounded-[6px] px-2.5 py-1 hover:bg-gray-50 hover:text-gray-900 transition-colors"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="15 3 21 3 21 9" />
-                        <polyline points="9 21 3 21 3 15" />
-                        <line x1="21" y1="3" x2="14" y2="10" />
-                        <line x1="3" y1="21" x2="10" y2="14" />
-                      </svg>
-                      Expand
-                    </button>
-                  </div>
-                  <div className="px-[18px] py-4 max-h-[280px] overflow-y-auto">
-                    <pre className="text-[12.5px] text-[#374151] whitespace-pre-wrap font-sans leading-[1.65]">
-                      {application.jobDescription}
-                    </pre>
-                  </div>
-                </div>
-              )}
-            </div>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
           </div>
         )}
 
         {/* ════════════════ AI RESUME FIT TAB ════════════════ */}
         {activeTab === "ai" && (
           <div className="flex flex-col gap-4">
-
             {/* Resume banner */}
-            <div className="text-[12.5px] text-gray-500">
+            <p className="m-0 text-sm2 text-body">
               Analysis is based on your currently uploaded resume.{" "}
-              <Link href="/profile" className="text-[#FF6B35] hover:underline">
+              <Link href="/profile" className="text-brand hover:underline">
                 Update resume in Profile
               </Link>{" "}
               to reanalyse with a newer version.
-            </div>
+            </p>
 
             {/* Loading state */}
-            {loadingAnalysis && (
-              <div className="text-[13px] text-gray-500">Loading...</div>
-            )}
+            {loadingAnalysis && <div className="text-sm2 text-body">Loading...</div>}
 
             {/* No analysis yet */}
             {!loadingAnalysis && !savedAnalysis && (
-              <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] p-6 flex flex-col items-center gap-4 text-center">
-                <div className="w-12 h-12 rounded-[12px] bg-[#FFF1EC] flex items-center justify-center">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FF6B35" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                    <polyline points="10 9 9 9 8 9" />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-[14px] font-semibold text-gray-900 mb-1">No analysis yet</div>
-                  <div className="text-[12.5px] text-gray-500">
-                    Compare your resume against this job description
+              <EmptyState
+                title="No analysis yet"
+                description="Compare your resume against this job description"
+                action={
+                  <div className="flex flex-col items-center gap-3">
+                    {analysisError && <div className="text-sm text-danger">{analysisError}</div>}
+                    <Button onClick={handleAnalyze} disabled={analyzeResume.isPending}>
+                      {analyzeResume.isPending ? "Analysing..." : "Analyse resume"}
+                    </Button>
                   </div>
-                </div>
-                {analysisError && (
-                  <div className="text-sm text-red-500">{analysisError}</div>
-                )}
-                <button
-                  onClick={handleAnalyze}
-                  disabled={analyzeResume.isPending}
-                  className="text-[13px] font-semibold px-5 py-2 bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] transition-colors"
-                >
-                  {analyzeResume.isPending ? "Analysing..." : "Analyse resume"}
-                </button>
-              </div>
+                }
+              />
             )}
 
             {/* Analysis results */}
             {!loadingAnalysis && savedAnalysis && (
-              <div className="flex flex-col gap-4">
-
+              <div className="rounded-[14px] border border-line bg-surface p-6">
                 {/* Reanalyse error (results are visible, so surface it here) */}
                 {analysisError && (
-                  <div className="text-sm text-red-500">{analysisError}</div>
+                  <div className="mb-4 text-sm text-danger">{analysisError}</div>
                 )}
 
-                {/* Score card */}
-                <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-[13px] font-semibold text-gray-900">Match Score</div>
-                    <button
-                      onClick={handleAnalyze}
-                      disabled={analyzeResume.isPending}
-                      className="text-[12px] text-gray-400 hover:text-[#FF6B35] transition-colors disabled:opacity-45"
-                    >
-                      {analyzeResume.isPending ? "Analysing..." : "Reanalyse"}
-                    </button>
+                <div className="flex items-start justify-between gap-6">
+                  <div className="min-w-0">
+                    <Eyebrow>Resume fit</Eyebrow>
+                    <h2 className="m-0 mt-2.5 text-lg font-semibold tracking-[-0.01em]">
+                      {application.companyName} — {application.jobTitle}
+                    </h2>
                   </div>
-                  <div className="flex items-end gap-3 mb-2">
-                    <div className="text-[42px] font-bold text-[#FF6B35] leading-none">
-                      {savedAnalysis.matchScore}
-                    </div>
-                    <div className="text-[16px] text-gray-400 mb-1">/100</div>
-                  </div>
-                  <div className="text-[12.5px] text-gray-500 mb-3">
-                    {scoreLabel(savedAnalysis.matchScore)}
-                  </div>
-                  <div className="h-2 bg-[#F3F4F6] rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-[#FF6B35] rounded-full transition-all"
-                      style={{ width: `${savedAnalysis.matchScore}%` }}
-                    />
-                  </div>
+                  <ScoreMeter
+                    score={savedAnalysis.matchScore}
+                    label={scoreTag(savedAnalysis.matchScore)}
+                    className="shrink-0"
+                  />
                 </div>
+                <ScoreBar score={savedAnalysis.matchScore} className="mt-5" />
 
-                {/* Recruiter take */}
-                <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] px-5 py-4">
-                  <div className="text-[12px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-                    Recruiter Take
-                  </div>
-                  <div className="text-[13.5px] text-gray-700 italic leading-relaxed">
-                    &ldquo;{savedAnalysis.recruiterTake}&rdquo;
-                  </div>
-                </div>
-
-                {/* Strongest points */}
-                <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] px-5 py-4">
-                  <div className="text-[12px] font-semibold text-gray-400 uppercase tracking-wide mb-3">
-                    Strongest Points
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {savedAnalysis.strongestPoints.map((point, i) => (
-                      <div key={i} className="flex items-start gap-2 text-[13px] text-gray-700">
-                        <span className="text-[#15803D] mt-0.5 flex-shrink-0">
-                          <CheckIcon size={13} />
-                        </span>
-                        {point}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Missing keywords */}
-                {savedAnalysis.missingKeywords.length > 0 && (
-                  <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] px-5 py-4">
-                    <div className="text-[12px] font-semibold text-gray-400 uppercase tracking-wide mb-3">
-                      Missing Keywords
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {savedAnalysis.missingKeywords.map((kw, i) => (
-                        <span
-                          key={i}
-                          className="px-2.5 py-1 bg-[#FFF1EC] text-[#C2410C] text-[12px] font-medium rounded-full border border-[rgba(194,65,12,0.15)]"
-                        >
-                          {kw}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Red flags */}
-                {savedAnalysis.redFlags.length > 0 && (
-                  <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07)] px-5 py-4">
-                    <div className="text-[12px] font-semibold text-gray-400 uppercase tracking-wide mb-3">
-                      Red Flags
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {savedAnalysis.redFlags.map((flag, i) => (
-                        <div key={i} className="flex items-start gap-2 text-[13px] text-gray-700">
-                          <span className="text-red-500 mt-0.5 flex-shrink-0">
-                            <CrossIcon size={13} />
-                          </span>
-                          {flag}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Copy improvement prompt */}
-                <div className="flex justify-end pt-1">
-                  <button
-                    onClick={handleCopyPrompt}
-                    className="text-[12.5px] font-medium px-4 py-2 border border-[#E5E7EB] rounded-[6px] text-gray-600 hover:border-[#FF6B35] hover:text-[#FF6B35] transition-colors"
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <Eyebrow>Analyzed {formatDateUS(savedAnalysis.createdAt)}</Eyebrow>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAnalyze}
+                    disabled={analyzeResume.isPending}
                   >
-                    {copied ? "Copied!" : "Copy improvement prompt"}
-                  </button>
+                    {analyzeResume.isPending ? "Analysing..." : "Reanalyse"}
+                  </Button>
+                </div>
+                <p className="m-0 mt-5 text-[15px] leading-[1.6] text-body">
+                  {scoreLabel(savedAnalysis.matchScore)}
+                </p>
+
+                {savedAnalysis.missingKeywords.length > 0 && (
+                  <div className={SECTION_DIVIDER}>
+                    <Eyebrow>Missing keywords</Eyebrow>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {savedAnalysis.missingKeywords.map((kw, i) => (
+                        <Tag key={i}>
+                          {kw}
+                        </Tag>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className={SECTION_DIVIDER}>
+                  <Eyebrow>Strongest points</Eyebrow>
+                  <ul className="m-0 mt-3 flex list-none flex-col gap-2.5 p-0 text-sm">
+                    {savedAnalysis.strongestPoints.map((point, i) => (
+                      <li key={i} className="flex items-start gap-2.5">
+                        <Check size={16} className="mt-0.5 shrink-0 text-success" />
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
 
-                {/* Analysed date */}
-                <div className="text-[11.5px] text-gray-400 text-right">
-                  Analysed on {formatDate(savedAnalysis.createdAt)}
+                {savedAnalysis.redFlags.length > 0 && (
+                  <div className={SECTION_DIVIDER}>
+                    <Eyebrow>Red flags</Eyebrow>
+                    <ul className="m-0 mt-3 flex list-none flex-col gap-2.5 p-0 text-sm">
+                      {savedAnalysis.redFlags.map((flag, i) => (
+                        <li key={i} className="flex items-start gap-2.5">
+                          <Flag size={16} className="mt-0.5 shrink-0 text-danger" />
+                          {flag}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className={SECTION_DIVIDER}>
+                  <Eyebrow>Recruiter take</Eyebrow>
+                  <blockquote className="m-0 mt-3 border-l-2 border-brand-logo py-0.5 pl-3.5 text-[17px] font-medium leading-normal">
+                    {savedAnalysis.recruiterTake}
+                  </blockquote>
                 </div>
 
+                <div className={SECTION_DIVIDER}>
+                  <div className="flex items-center justify-between gap-3">
+                    <Eyebrow>Improvement prompt</Eyebrow>
+                    <div className="flex items-center gap-2.5">
+                      {copied && (
+                        <span role="status" className="font-mono text-mono tracking-[0.06em] text-success">
+                          Copied!
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCopyPrompt}
+                        aria-label="Copy improvement prompt"
+                      >
+                        <Copy size={13} />
+                        Copy
+                      </Button>
+                    </div>
+                  </div>
+                  <pre className="m-0 mt-3 whitespace-pre-wrap rounded-btn bg-surface-alt p-3.5 font-mono text-[12.5px] leading-[1.6] text-body">
+                    {improvementPrompt}
+                  </pre>
+                  <FieldHint className="mt-2.5">Paste this into your preferred AI tool to improve your resume for this role.</FieldHint>
+                </div>
               </div>
             )}
           </div>
@@ -1035,99 +739,74 @@ Please help me improve my resume to address these gaps.`
 
         {/* ════════════════ REMINDER TAB ════════════════ */}
         {activeTab === "reminder" && (
-          <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-6 items-start">
-
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
             {/* Form */}
-            <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07),0_1px_2px_rgba(0,0,0,0.04)]">
-              <div className="px-5 pt-4 pb-3.5 border-b border-[#F0F1F4]">
-                <div className="text-sm font-semibold text-gray-900">Set a reminder</div>
-                <div className="text-[12.5px] text-gray-500 mt-0.5">Get an email when you need to follow up</div>
+            <div>
+              <Eyebrow className="mb-2.5">Remind me on</Eyebrow>
+              <div className="flex flex-wrap gap-2">
+                <Chip compact selected={reminderDate === inDays(1)} onClick={() => pickReminderDate(inDays(1))}>
+                  Tomorrow
+                </Chip>
+                <Chip compact selected={reminderDate === inDays(3)} onClick={() => pickReminderDate(inDays(3))}>
+                  In 3 days
+                </Chip>
+                <Chip compact selected={reminderDate === inDays(7)} onClick={() => pickReminderDate(inDays(7))}>
+                  Next week
+                </Chip>
               </div>
-              <div className="p-5">
-                <div className="mb-4">
-                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Reminder date</label>
-                  <input
-                    type="date"
-                    min={toISODate(new Date())}
-                    value={reminderDate}
-                    onChange={(e) => {
-                      setReminderDate(e.target.value)
-                      setReminderSaved(false)
-                      setReminderError(null)
-                    }}
-                    className="w-full border border-[#E5E7EB] rounded-[6px] px-3 py-[9px] text-[13.5px] text-gray-900 bg-white outline-none focus:border-[#FF6B35] focus:ring-[3px] focus:ring-[rgba(255,107,53,0.12)] cursor-pointer"
-                  />
-                </div>
-                <div className="mb-5">
-                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Note (optional)</label>
-                  <textarea
-                    value={reminderNotes}
-                    onChange={(e) => setReminderNotes(e.target.value)}
-                    rows={3}
-                    placeholder="e.g. Follow up on application status, ask about timeline…"
-                    className="w-full border border-[#E5E7EB] rounded-[6px] px-3 py-[9px] text-[13.5px] text-gray-900 bg-white outline-none focus:border-[#FF6B35] focus:ring-[3px] focus:ring-[rgba(255,107,53,0.12)] resize-y leading-relaxed"
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={handleCreateReminder}
-                    disabled={createReminder.isPending}
-                    className="text-[13px] font-semibold px-4 py-2 bg-[#FF6B35] text-white rounded-[6px] disabled:opacity-45 hover:bg-[#E85A26] transition-colors"
-                  >
-                    {createReminder.isPending ? "Saving..." : "Set reminder"}
-                  </button>
-                  {reminderSaved && (
-                    <span className="text-sm text-[#15803D] font-medium">Reminder set.</span>
-                  )}
-                  {reminderError && (
-                    <span className="text-sm text-red-500">{reminderError}</span>
-                  )}
-                </div>
+              <Label className="sr-only">Reminder date</Label>
+              <Input
+                type="date"
+                min={toISODate(new Date())}
+                value={reminderDate}
+                onChange={(e) => pickReminderDate(e.target.value)}
+                placeholder="Pick a date"
+                className="mt-2.5 cursor-pointer"
+              />
+              {reminderError && <FieldError className="mt-2">{reminderError}</FieldError>}
+
+              <Eyebrow className="mb-2.5 mt-5">Note (optional)</Eyebrow>
+              <Textarea
+                value={reminderNotes}
+                onChange={(e) => setReminderNotes(e.target.value)}
+                rows={3}
+                placeholder="e.g. Follow up on application status, ask about timeline…"
+                className="min-h-[120px] text-sm"
+              />
+
+              <Button
+                size="cta"
+                className="mt-4 w-full"
+                onClick={handleCreateReminder}
+                disabled={createReminder.isPending}
+              >
+                <Bell size={15} />
+                {createReminder.isPending ? "Saving..." : "Set reminder"}
+              </Button>
+              <div className="mt-2.5 flex items-center justify-between gap-3">
+                <p className="m-0 text-xs text-muted">
+                  We&apos;ll email you on this date with the application details.
+                </p>
+                {reminderSaved && (
+                  <span role="status" className="shrink-0 font-mono text-mono tracking-[0.06em] text-success">
+                    Reminder set.
+                  </span>
+                )}
               </div>
             </div>
 
-            {/* Info + upcoming */}
+            {/* Upcoming — static placeholder; no list endpoint exists yet */}
             <div>
-              <div className="bg-[#FFF4EF] border border-[rgba(255,107,53,0.2)] rounded-[10px] p-4">
-                <div className="flex items-center gap-1.5 text-[13px] font-semibold text-[#FF6B35] mb-2">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                  </svg>
-                  How reminders work
-                </div>
-                <div className="flex flex-col gap-2">
-                  {[
-                    "Pick a date — the day you want to follow up if you haven't heard back.",
-                    "On that morning, ApplynTrack sends an email to your registered address.",
-                    "The email includes the company name, role, and your note so you have full context.",
-                    "You can update or delete a reminder any time before it fires.",
-                  ].map((line) => (
-                    <div key={line} className="flex gap-2 text-[12.5px] text-gray-700 leading-relaxed">
-                      <span className="text-[#FF6B35] flex-shrink-0">•</span>
-                      <span>{line}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Upcoming reminders — static placeholder; no list endpoint exists yet */}
-              <div className="bg-white border border-[#E5E7EB] rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.07),0_1px_2px_rgba(0,0,0,0.04)] mt-4">
-                <div className="px-[18px] pt-3.5 pb-3 border-b border-[#F0F1F4] text-[13px] font-semibold text-gray-900">
-                  Upcoming reminders
-                </div>
-                <div className="px-[18px] py-8 text-center">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto mb-2.5">
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                  </svg>
-                  <div className="text-[13px] text-gray-500">No reminders set for this application</div>
-                </div>
+              <Eyebrow className="mb-1">Upcoming</Eyebrow>
+              <div className={cn("rounded-card border border-dashed border-line-dashed px-4 py-8 text-center")}>
+                <Bell size={28} className="mx-auto mb-2.5 text-faint" strokeWidth={1.5} />
+                <div className="text-sm2 text-muted">No reminders set for this application</div>
               </div>
             </div>
           </div>
         )}
       </div>
-    </div>
+    </>,
+    !confirmDelete && !jdModalOpen
   )
 }

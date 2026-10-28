@@ -5,11 +5,13 @@ export default function Avatar({
   name,
   src,
   size = 32,
+  fontSize,
   className,
 }: {
   name: string
   src?: string | null
   size?: number
+  fontSize?: number
   className?: string
 }) {
   const initials =
@@ -40,7 +42,7 @@ export default function Avatar({
         "inline-flex items-center justify-center rounded-full bg-brand-logo text-white font-semibold shrink-0",
         className
       )}
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.375) }}
+      style={{ width: size, height: size, fontSize: fontSize ?? Math.round(size * 0.375) }}
     >
       {initials}
     </span>

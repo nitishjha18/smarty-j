@@ -1,6 +1,4 @@
-import { cn } from "../../lib/cn"
-
-/** Big score number plus a thin progress bar (AI resume fit). */
+/** Big score number plus a tag under it (AI resume fit). Pair with `ScoreBar`. */
 export default function ScoreMeter({
   score,
   label,
@@ -10,32 +8,36 @@ export default function ScoreMeter({
   label?: string
   className?: string
 }) {
-  const pct = Math.max(0, Math.min(100, score))
   return (
     <div className={className}>
       <div className="flex items-baseline justify-end gap-1">
-        <span className="text-[56px] leading-none font-semibold tracking-tight text-brand">
+        <span className="text-[64px] font-semibold leading-[0.9] tracking-[-0.04em] text-brand">
           {score}
         </span>
         <span className="font-mono text-sm text-muted">/100</span>
       </div>
       {label && (
-        <p className="m-0 text-right font-mono text-mono uppercase tracking-eyebrow text-muted">
+        <p className="m-0 mt-1.5 text-right font-mono text-mono uppercase tracking-[0.06em] text-muted">
           {label}
         </p>
       )}
-      <div
-        role="progressbar"
-        aria-valuenow={pct}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        className={cn("mt-4 h-1.5 w-full rounded-full bg-brand-tint")}
-      >
-        <div
-          className="h-full rounded-full bg-brand-logo"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+    </div>
+  )
+}
+
+/** Thin full-width progress bar for the score. */
+export function ScoreBar({ score, className }: { score: number; className?: string }) {
+  const pct = Math.max(0, Math.min(100, score))
+  return (
+    <div
+      role="meter"
+      aria-label="Resume fit score"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={pct}
+      className={`h-1.5 overflow-hidden rounded-[3px] bg-brand-tint ${className ?? ""}`}
+    >
+      <div className="h-full rounded-[3px] bg-brand-logo" style={{ width: `${pct}%` }} />
     </div>
   )
 }

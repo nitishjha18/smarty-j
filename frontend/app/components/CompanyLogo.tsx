@@ -1,6 +1,9 @@
 "use client"
 
 import { useState } from "react"
+import type { ApplicationStatus } from "../types"
+import { cn } from "../lib/cn"
+import { STATUS_STYLES } from "../lib/status"
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_BRANDFETCH_CLIENT_ID
 
@@ -8,17 +11,25 @@ export default function CompanyLogo({
   domain,
   name,
   size = 28,
+  tone,
 }: {
   domain?: string | null
   name: string
   size?: number
+  /** Colors the letter-avatar fallback with this status color (design's letter tiles). */
+  tone?: ApplicationStatus
 }) {
   const [failed, setFailed] = useState(false)
   const showImage = !!domain && !!CLIENT_ID && !failed
 
   return (
     <div
-      className="shrink-0 flex items-center justify-center overflow-hidden bg-surface-alt border border-line font-bold text-muted"
+      className={cn(
+        "shrink-0 flex items-center justify-center overflow-hidden font-semibold",
+        showImage || !tone
+          ? "bg-surface-alt border border-line text-muted"
+          : cn(STATUS_STYLES[tone].dot, "text-white")
+      )}
       style={{
         width: size,
         height: size,

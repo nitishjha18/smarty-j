@@ -1,7 +1,7 @@
 # ApplynTrack — Technical Architecture
 
 **Document location:** `docs/architecture.md`
-**Last updated:** October 2026
+**Last updated:** October 2026 (UI redesign)
 **Author:** Nitish Jha
 
 ---
@@ -77,16 +77,24 @@ API calls: all calls to the Express backend go through `frontend/app/lib/api.ts`
 Auth: `useAuth()` provides `getToken()`. Every query and mutation gets a fresh token immediately before its API call. `useUserSync()` is enabled only for a loaded, signed-in Clerk user; all other queries are enabled only after that shared sync query succeeds. `useUser()` provides user display name for the greeting.
 
 Component structure:
-- `components/Sidebar.tsx` — shared across all protected pages via the protected layout
+- `components/Sidebar.tsx` — shared across all protected pages via the protected layout: a 240px sidebar from `lg` up, and a top bar with a menu button and slide-in drawer below `lg`. The footer shows the user's avatar, name and email with a sign-out button.
+- `components/BrandLogo.tsx` — orange check tile and wordmark, used by the sidebar, the landing navbar and footer
+- `components/ui/` — shared UI primitives (`Button`, `Card`, `Chip`, `Tag`, `Field` inputs, `Modal`, `Tabs`, `Stepper`, `ScoreMeter`, `StatusBadge` family, `Eyebrow`, `Avatar`, `EmptyState`)
+- `lib/status.ts`, `lib/dates.ts`, `lib/cn.ts` — shared status maps and color classes, date helpers, and a class joiner
+- `(marketing)/` — public landing page: `layout.tsx` (navbar and footer) and `_components/` (Hero, OldWay, Track, AiFit, FollowUp, Steps, ClosingCta, plus sample data and mockup primitives)
 - `components/Skeleton.tsx` — neutral first-load placeholder primitive
 - `components/CompanyLogo.tsx` — company logo with letter-avatar fallback, used on the board, detail page, dashboard, and the create form
 - `components/CompanySearchInput.tsx` — company name autocomplete on the create page, backed by the Brandfetch Brand Search API
 - `providers.tsx` — QueryClient provider and development-only React Query Devtools
 - Every data-driven page and the protected layout are client components (`"use client"`)
-- Server components are used only for static shells with no data fetching: the root `app/layout.tsx`, the home page `app/page.tsx` (currently a placeholder that renders only a `Job Tracker` heading; see `docs/code-bugs.md` CB-15), the sign-in page, and `components/Skeleton.tsx`
+- Server components are used only for static shells with no data fetching: the root `app/layout.tsx`, the landing page `app/(marketing)/page.tsx` and its sections (only `Navbar` is a client component, for its scroll state), the sign-in page, and `components/Skeleton.tsx`
 - Route protection is also enforced in `frontend/middleware.ts` (Clerk `clerkMiddleware`): every route except `/`, `/sign-in(.*)` and `/sign-up(.*)` calls `auth.protect()`
 
-Design system: Inter is applied at the root. The shell and dashboard use orange `#FC8019`, with white surfaces, `#F4F5F7` page background, `#111827` primary text, and `#6B7280` secondary text. Borders use `#E5E7EB` or `#F0F1F4`; active navigation uses `#FFF4EC`. Statuses use blue, amber, purple, orange, green, and rose/red accents. Individual form and detail controls also use local orange values. The application is light-mode oriented, although `globals.css` defines a dark system-color override.
+Design system: colors, radii, shadows and type are design tokens defined once under `@theme` in `app/globals.css` and used as Tailwind utilities (`bg-brand`, `text-ink`, `border-line`, `rounded-card`, `shadow-pop`, `bg-st-applied`). The brand color is orange `#F25A1D` (hover `#E04E14`), with ink `#171717`, muted `#737373`, warm borders `#EDE7E3`, a sidebar tint `#FFF8F4`, and a peach landing background `#FFD8AE`. Each status has a color, tint and text variant: Applied blue, Screening amber, Interview purple, Assignment teal, Offer green, Rejected rose. Fonts are Geist (UI), Geist Mono (eyebrows and meta), and Caveat (handwritten landing annotations), loaded with `next/font/google` in `app/layout.tsx`. The app is light-mode only; the earlier dark system-color override was removed.
+
+Presentation of detail and create: `/applications/new` and `/applications/[id]` render the applications board and then a `Modal` on top of it. They stay real routes (shareable URLs, browser back works), and closing navigates away instead of toggling state.
+
+Routing: `/` is the public landing page (`app/(marketing)/page.tsx`). Its calls to action go to `/sign-in`.
 
 ---
 
@@ -468,7 +476,7 @@ The application is a monolith by design. At the current scale, the operational o
 
 ### UI Polish
 
-The frontend uses a consistent light-oriented shell, dashboard, application, and profile design with the `#FC8019` orange accent. The implementation is documented in `docs/modules/`.
+The frontend follows the redesigned ApplynTrack visual system (orange `#F25A1D` accent, Geist type, tokenized colors). The implementation is documented in `docs/modules/`.
 
 ---
 
@@ -500,20 +508,20 @@ The backend stat, the dashboard page, the Applications header chip, the Applicat
 **Local API URL fallback** (CB-05)
 `frontend/app/lib/api.ts` falls back to `http://localhost:5000` when `NEXT_PUBLIC_API_URL` is missing, and `frontend/next.config.ts` contains a localhost API rewrite. Production deployment should provide the environment variable and review the rewrite so frontend API traffic points at the deployed backend.
 
-**Sidebar target role source** (CB-06)
-`Sidebar.tsx` reads `targetRole` from Clerk `publicMetadata`, which the app never writes, instead of from the saved profile.
+**Sidebar target role source** (CB-06, superseded)
+The redesigned sidebar footer shows name and email and no longer reads `publicMetadata.targetRole`.
 
 **GET analysis returns `suggestions` as a string** (CB-07)
 `GET /api/ai/resume-analysis/:appId` does not parse `suggestions`; `POST /api/ai/analyze-resume` does.
 
-**Reminders** (CB-08, CB-09, CB-10, CB-13)
-The Reminder tab text promises update and delete controls that do not exist, the email HTML does not escape user text, `PUT /api/reminders/:id` does not reset `isSent`, and the client helpers `updateReminder` and `deleteReminder` are unused.
+**Reminders** (CB-09, CB-10, CB-13; CB-08 resolved by the redesign)
+The email HTML does not escape user text, `PUT /api/reminders/:id` does not reset `isSent`, and the client helpers `updateReminder` and `deleteReminder` are unused.
 
 **Unused backend packages and a personal ngrok host** (CB-11)
 `axios`, `jsonwebtoken`, `@types/jsonwebtoken` and `@types/pdf-parse` are not used by the backend source, and `frontend/next.config.ts` lists a personal ngrok host in `allowedDevOrigins`.
 
-**Stale comments and placeholder page** (CB-12, CB-14, CB-15)
-Comments in the applications page cite a nonexistent `docs/context.md`, `getProfileController` has an effectively unreachable 404 branch, and the home page is a placeholder.
+**Stale comments** (CB-12, CB-14)
+`getProfileController` has an effectively unreachable 404 branch. The page comments that cited a nonexistent `docs/context.md` were removed in the redesign. The placeholder home page (CB-15) is replaced by the landing page. `/sign-up` is still a public route in middleware with no page.
 
 **resumeText stored as raw extracted text**
 The text extracted from PDFs includes spacing artifacts and layout noise from the PDF engine. This is sent directly to Gemini without cleaning. It works in practice but cleaner text would produce better AI results.

@@ -30,13 +30,18 @@
   --color-brand-border: #ffcdb5;
   --color-brand-dark: #c2410c;
   --color-brand-darker: #a8340a;
+  --color-warm-card: #ffebd6;
+  --color-warm-border: #ffc99a;
   --color-peach: #ffd8ae;
+  --color-brand-accent: #d9480f;
+  --color-ink-soft: #3f3f3f;
 
   /* Feedback */
   --color-danger: #e11d48;
   --color-danger-tint: #fff1f2;
   --color-success: #16a34a;
   --color-success-tint: #f0fdf4;
+  --color-success-soft: #dcfce7;
 
   /* Status colors: dot/bar, light tint, readable text */
   --color-st-applied: #3b82f6;
@@ -94,6 +99,23 @@ html {
 body {
   background: var(--color-surface);
   color: var(--color-ink);
+}
+
+/* Thin light scrollbars (board and lanes). */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-dashed) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-line-dashed);
+  border-radius: 3px;
 }
 
 :focus-visible {

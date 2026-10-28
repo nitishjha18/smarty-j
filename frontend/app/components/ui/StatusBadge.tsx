@@ -61,3 +61,40 @@ export default function StatusBadge({
     </span>
   )
 }
+
+/** "● Screening → ● Interview" (or just the target when there is no previous status). */
+export function StatusTransition({
+  from,
+  to,
+  size = "sm2",
+  className,
+}: {
+  from: ApplicationStatus | null
+  to: ApplicationStatus
+  size?: "sm" | "sm2"
+  className?: string
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center whitespace-nowrap font-medium text-ink",
+        size === "sm" ? "text-sm" : "text-sm2",
+        className
+      )}
+    >
+      {from && (
+        <>
+          <span className="inline-flex items-center gap-1.5">
+            <StatusDot status={from} />
+            {STATUS_LABELS[from]}
+          </span>
+          <span className="mx-1 text-muted">→</span>
+        </>
+      )}
+      <span className="inline-flex items-center gap-1.5">
+        <StatusDot status={to} />
+        {STATUS_LABELS[to]}
+      </span>
+    </span>
+  )
+}

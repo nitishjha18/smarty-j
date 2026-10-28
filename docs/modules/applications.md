@@ -367,37 +367,13 @@ Errors:
 
 ## 3. Shared Utilities
 
-`STATUS_LABELS`, `SOURCE_LABELS`, `formatDate`, `daysSince`, and status color maps currently live in the application pages. Extracting them to a shared utility remains a cleanup task.
+The status and source maps, status color classes, and date helpers are shared by every page:
 
-```ts
-const STATUS_LABELS: Record<ApplicationStatus, string> = {
-  APPLIED: "Applied",
-  SCREENING: "Screening",
-  INTERVIEW: "Interview",
-  ASSIGNMENT: "Assignment",
-  OFFER: "Offer",
-  REJECTED: "Rejected",
-}
+- `frontend/app/lib/status.ts`: `STATUS_LABELS`, `SOURCE_LABELS`, `ALL_STATUSES`, `PIPELINE_STAGES` (the five forward stages, without `REJECTED`), and `STATUS_STYLES` (Tailwind class names per status: `dot`, `border`, `tint`, `text`).
+- `frontend/app/lib/dates.ts`: `formatDate` (`20 Aug 2026`, en-IN), `formatDateUS` (`Aug 20, 2026`), `formatShortDate` (`AUG 20`), `formatDateTime` (`AUG 20, 2:30 PM`), `daysSince` (`Today` / `1 day ago` / `N days ago`, calendar days), `timeAgo` (`Today` / `Yesterday` / `N days ago`, elapsed time), and `daysSinceLastStatusChange(app, now)`.
+- `frontend/app/lib/cn.ts`: class-name joiner.
 
-const SOURCE_LABELS: Record<string, string> = {
-  LINKED_IN: "LinkedIn",
-  NAUKARI: "Naukri",
-  REFERAL: "Referral",
-  COLDEMAIL: "Cold Email",
-  SOCIAL_MEDIA: "Social Media",
-  OTHER_JOB_APPS: "Other",
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  })
-}
-```
-
----
+Colors, radii, shadows and fonts are defined once as design tokens under `@theme` in `frontend/app/globals.css` (for example `bg-brand`, `text-ink`, `rounded-card`, `shadow-pop`, `bg-st-applied`). Reusable UI lives in `frontend/app/components/ui/` (`Button`, `Card`, `Chip`, `Tag`, `Field` inputs, `Modal`, `Tabs`, `Stepper`, `ScoreMeter`, `StatusBadge`/`StatusDot`/`StatusLabel`/`StatusTransition`, `Eyebrow`, `Avatar`, `EmptyState`).
 
 ## 4. Applications List Page
 
@@ -409,33 +385,24 @@ frontend/app/(protected)/applications/page.tsx
 
 ### Purpose and content
 
-The list is a six-column status board. It preserves the backend's descending `dateApplied` order within each status column and shows a count chip, stale-applications chip, per-status summary strip, and cards with company name, job title, source, formatted date, and a color-coded left edge shown on hover. Cards are click-only: there is no drag-and-drop between columns, and status changes happen on the detail page.
+The page header shows `Applications` and a subline: `{n} total · {x} gone quiet`, or `{n} total · All caught up — no stale applications` when nothing is stale. A `New application` button (44px) sits on the right. The orange `{x} gone quiet →` text is a link that scrolls the board to the first card with a `QUIET` label. The list is a six-column status board that scrolls horizontally (280px columns, 16px gap) and fills the available height, with thin scrollbars. Each column has a centered status name and count, a status-colored bar, and cards. A card shows the company logo (letter avatar tinted with the status color when there is no logo), company name, job title, and a mono line `SOURCE · MMM D`. Within a column the backend's descending `dateApplied` order is preserved. Cards are links to the detail page: there is no drag-and-drop, and status changes happen on the detail page. `REJECTED` cards are dimmed.
 
 Two different "stale" measures appear on this page (known issue — see `docs/code-bugs.md` CB-04):
 
-- **Header chip:** `{n} stale — no update in 14+ days`, or `All caught up — no stale applications` when the count is zero. The count includes only applications whose status is `APPLIED` and whose `dateApplied` is 14 or more days ago. Despite the "no update" wording, it does not look at status history.
-- **Card badge:** a small `{n}d` badge on a card when 14 or more days have passed since its most recent status change (the newest `statusHistory` entry, or `updatedAt` when there is no history). It applies to a card in any status, including `OFFER` and `REJECTED`.
+- **Header count:** `{n} gone quiet`. The count includes only applications whose status is `APPLIED` and whose `dateApplied` is 14 or more days ago. It does not look at status history.
+- **Card label:** `QUIET {n} DAYS` in orange on a card when 14 or more days have passed since its most recent status change (the newest `statusHistory` entry, or `updatedAt` when there is no history), via `daysSinceLastStatusChange`. It applies to a card in any status, including `OFFER` and `REJECTED`.
 
-Status color mapping:
-
-| Status | Color family |
-|---|---|
-| APPLIED | blue |
-| SCREENING | amber |
-| INTERVIEW | purple |
-| ASSIGNMENT | orange |
-| OFFER | green |
-| REJECTED | rose/red |
+Status colors come from `STATUS_STYLES` (Applied blue, Screening amber, Interview purple, Assignment teal, Offer green, Rejected rose).
 
 ### Company logo
 
-Each card shows the company logo through `CompanyLogo` (28px) to the left of the company name and job title. An application with no stored `companyDomain` makes no logo request and shows a letter avatar. An application with a domain requests its logo image from Brandfetch's CDN whenever the card renders; the browser may serve repeat loads from its cache.
+Each card shows the company logo through `CompanyLogo` (28px, `tone` set to the card's status) to the left of the company name and job title. An application with no stored `companyDomain` makes no logo request and shows a letter avatar. An application with a domain requests its logo image from Brandfetch's CDN whenever the card renders; the browser may serve repeat loads from its cache.
 
 ### States
 
 - Loading: six columns of `Skeleton` placeholders while the first query is pending.
 - Error: the query error message centered in red.
-- Empty: empty state that links to creating the first application.
+- Empty: an `EmptyState` (`No applications yet`) with an `Add first application` button that links to `/applications/new`.
 - Populated: clickable application items.
 
 ### Fetch pattern
@@ -451,7 +418,7 @@ const error = queryError?.message ?? null
 
 ### Navigation
 
-The new-application action navigates to `/applications/new`. Clicking an application navigates to `/applications/:id`.
+The new-application buttons link to `/applications/new`. Clicking an application card navigates to `/applications/:id`. Both of those routes render this board behind a dialog (see sections 5 and 6).
 
 ---
 
@@ -465,21 +432,21 @@ frontend/app/(protected)/applications/new/page.tsx
 
 ### Purpose and fields
 
-The page creates one application and then routes directly to its detail page.
+The route is presented as a dialog (`Modal`, 640px) titled `New application` / `Add a job to your tracking pipeline.`. The applications board renders behind it. The dialog creates one application and then routes directly to its detail page. The close button, Esc, backdrop click and `Cancel` all call `router.back()`.
 
 | Field | Input | Required | Initial value |
 |---|---|---|---|
 | `companyName` | autocomplete text input (`CompanySearchInput`) | Yes | `""` |
 | `companyDomain` | set by picking a suggestion; no visible input | No | `""` |
 | `jobTitle` | text | Yes | `""` |
-| `source` | select | Yes | `LINKED_IN` |
-| `dateApplied` | date | No | today's date in UTC (`new Date().toISOString().split("T")[0]`) |
+| `source` | chips (one per source, single choice) | Yes | `LINKED_IN` |
+| `dateApplied` | native date input plus a `Today` button that sets today's UTC date | No | today's date in UTC (`new Date().toISOString().split("T")[0]`) |
 | `jobDescription` | textarea | No | `""` |
 | `notes` | textarea | No | `""` |
 
 The initial date uses the UTC calendar date, so between 00:00 and 05:30 IST the pre-filled date is the previous day in India. The user can change it before saving.
 
-The source select contains the six exact `ApplicationSource` values from the source-label table.
+The source chips are generated from `SOURCE_LABELS`, so they are the six exact `ApplicationSource` values. The company input shows a search icon and the placeholder `Start typing a company name…`; the job title placeholder is `e.g. Senior Frontend Engineer`; the job description has the hint `Optional — used for AI resume fit.`.
 
 ### Company autocomplete
 
@@ -510,7 +477,7 @@ router.push(`/applications/${data.application.id}`)
 
 ### States
 
-- Submitting: save button switches to saving state and is disabled.
+- Submitting: the `Save application` button shows `Saving...` and is disabled.
 - Error: client validation or API error is shown in red above the action buttons.
 - Cancel: calls `router.back()`.
 
@@ -528,31 +495,33 @@ This is the single source of truth for an application: its status, full history,
 
 ### Current layout
 
-The page is organized into three tabs:
+The route is presented as a dialog (`Modal`, 960px) over the applications board. It has a header and three tabs:
 
-- `overview`: pipeline, status controls, status history, notes, application details, and job description.
+- `overview`: stage stepper with a `Mark as rejected` link, notes, job description, and status history.
 - `ai`: saved resume analysis and reanalysis controls.
-- `reminder`: reminder creation and reminder guidance.
+- `reminder`: reminder creation and the upcoming-reminders placeholder.
 
-The header remains sticky and includes back navigation, the company logo and name, job title, current status badge, and a three-dot overflow menu. The menu has two items: `Edit details`, which is disabled and marked `Soon` (tooltip `Coming soon`), and `Delete`, which opens the delete confirmation. There is no way to edit an application's company, title, source, or job description from the UI yet, although `PUT /api/applications/:id` accepts them.
+The header shows the company logo (40px), company name, job title and a mono meta line: status, source, `Applied {Mon D, YYYY}`, and either `Quiet {n} days` (orange, when 14 or more days since the last status change) or the `daysSince` label. A three-dot menu next to the close button has two items: `Edit details`, which is disabled and marked `Soon` (tooltip `Coming soon`), and `Delete`, which opens the delete confirmation. There is no way to edit an application's company, title, source, or job description from the UI yet, although `PUT /api/applications/:id` accepts them.
 
-The company card on the overview tab uses `CompanyLogo` (44px) in place of the old first-letter box. Applications without a domain show a grey letter avatar.
+The close button, Esc and backdrop click navigate to `/applications`. Esc only closes the top-most dialog (the delete confirmation and the expanded job description are nested dialogs). `/applications/:id?tab=reminder` (used by the dashboard's `Remind me` button) opens the Reminder tab first; `tab=ai` and `tab=overview` work the same way.
 
 ### Initial data
 
-The page uses separate `useApplication(id)` and `useResumeAnalysis(id)` queries. The application query takes the matching item from the applications-list cache as `placeholderData`, then fetches its full detail. The saved-analysis query maps an absent response to `null`; a query error also renders as no saved analysis. Both wait for the shared user-sync query. The notes editor initializes only once for an application ID, so a refetch cannot replace text the user is typing.
+The page uses separate `useApplication(id)` and `useResumeAnalysis(id)` queries. The application query takes the matching item from the applications-list cache as `placeholderData`, then fetches its full detail. The saved-analysis query maps an absent response to `null`; a query error also renders as no saved analysis. Both wait for the shared user-sync query. The notes editor initializes during render only once for an application ID (guarded by `notesInitFor`), so a refetch cannot replace text the user is typing.
 
 ### Delete flow
 
-1. The user opens the overflow action and chooses delete.
-2. A confirmation modal asks `Delete this application?`.
+1. The user opens the three-dot menu and chooses delete.
+2. A confirmation dialog asks `Delete this application?`.
 3. `Yes, delete` calls `deleteApplication.mutateAsync(id)`.
 4. On success, route to `/applications`.
 5. Failure surfaces as the page error and closes the deleting state.
 
 ### Status update flow
 
-1. Ignore the event when there is no application, an update is running, or the selected status is already current.
+`Mark as rejected` sends `REJECTED`. Once rejected, the stepper shows the last stage reached in red with a cross and the link is hidden; clicking a stage moves the application back into the pipeline.
+
+1. The user clicks a stage in the stepper or `Mark as rejected`. Ignore the event when there is no application, an update is running, or the selected status is already current.
 2. Call `updateApplication.mutateAsync({ status: newStatus })`.
 3. The mutation writes the response into this application's query cache, then invalidates applications and dashboard stats.
 4. Show the temporary `Updated` confirmation.
@@ -569,15 +538,16 @@ This is intentionally non-optimistic: the page shows the status change only afte
 
 ### Job description display
 
-The overview tab renders the job description only when `application.jobDescription` is non-empty. The page includes an expand control that opens a modal for reading the full job description.
+The overview tab renders the job description only when `application.jobDescription` is non-empty, in a scrollable block under the notes. An `Expand` control opens a dialog for reading the full text.
 
 ### Detail page state variables
 
 ```ts
 const [activeTab, setActiveTab] =
-  useState<"overview" | "ai" | "reminder">("overview")
+  useState<"overview" | "ai" | "reminder">(/* ?tab= value, else "overview" */)
 const [overflowOpen, setOverflowOpen] = useState(false)
 const [jdModalOpen, setJdModalOpen] = useState(false)
+const [notesInitFor, setNotesInitFor] = useState<string | null>(null)
 
 const [notes, setNotes] = useState("")
 const [notesSaved, setNotesSaved] = useState(false)
@@ -597,9 +567,9 @@ const [reminderError, setReminderError] = useState<string | null>(null)
 
 ### Page states
 
-- Initial load: full-page `Skeleton` placeholders only while the application query has no cached or placeholder data.
-- Initial-load error: full-page error text in red.
-- Not found: `Application not found.`.
+- Initial load: `Skeleton` placeholders inside the dialog only while the application query has no cached or placeholder data.
+- Initial-load error: error text in red inside the dialog.
+- Not found: `Application not found.` inside the dialog.
 - Per-operation errors: retain the rendered application and display the error inline where possible.
 
 ---
@@ -630,23 +600,23 @@ The mutation writes its returned analysis to the detail page's cached analysis k
 
 ### Display
 
-When no saved analysis exists:
+When no saved analysis exists, an `EmptyState` shows:
 
-- Show `No analysis yet`.
-- Show `Compare your resume against this job description`.
-- Show `Analyse resume`, disabled while analysing.
-- Surface `analysisError` if present.
+- `No analysis yet`.
+- `Compare your resume against this job description`.
+- `Analyse resume`, disabled while analysing (`Analysing...`).
+- `analysisError` if present.
 
-When saved analysis exists:
+When saved analysis exists, one card shows:
 
-- Match score card with score out of 100, progress bar, and `scoreLabel`.
-- Reanalyse button.
-- Recruiter Take card.
-- Strongest Points list with success icon.
-- Missing Keywords pills when the array is non-empty.
-- Red Flags list when the array is non-empty.
-- Copy improvement prompt button.
-- Analysed date from `savedAnalysis.createdAt`.
+- `RESUME FIT` caption, `{company} — {job title}`, the score in large orange type with `/100` and a tag (`STRONG` at 85+, `GOOD` at 65+, otherwise `NEEDS WORK`), and a progress bar.
+- `ANALYZED {Mon D, YYYY}` (from `savedAnalysis.createdAt`) and a `Reanalyse` button.
+- The existing `scoreLabel` sentence (`Strong fit — you're well aligned` and so on).
+- `MISSING KEYWORDS` tags when the array is non-empty.
+- `STRONGEST POINTS` with check icons.
+- `RED FLAGS` with flag icons when the array is non-empty.
+- `RECRUITER TAKE` as a quote block.
+- `IMPROVEMENT PROMPT` with a `Copy` button (`Copied!` for 2 seconds) and the prompt text in a mono box.
 
 ### Copy improvement prompt
 
@@ -701,7 +671,7 @@ export interface ResumeAnalysis {
 
 ### How it works
 
-The user picks a date and optional note, then clicks `Set reminder`. `POST /api/reminders` stores the record with `isSent: false`.
+The user picks a date (quick chips `Tomorrow`, `In 3 days`, `Next week`, or the date input) and an optional note, then clicks `Set reminder`. `POST /api/reminders` stores the record with `isSent: false`.
 
 A daily 9am cron job finds unsent reminders whose `reminderDate` is today in UTC, sends an HTML email through Resend, then marks each record `isSent: true` so it cannot be sent twice. The sender address is the value of the `RESEND_FROM_EMAIL` environment variable; the code does not hardcode an address.
 
@@ -709,7 +679,7 @@ A daily 9am cron job finds unsent reminders whose `reminderDate` is today in UTC
 
 | Field | Input | Required |
 |---|---|---|
-| Reminder Date | date | Yes |
+| Reminder date | date input with quick chips that set tomorrow, +3 days, or +7 days | Yes |
 | Note | textarea | No |
 
 The date input has `min` set to today's date. Before the API call, a missing date sets `reminderError` to `Please select a reminder date.`.
@@ -733,13 +703,13 @@ await createReminder.mutateAsync({
 
 The detail-page UI currently creates reminders only. The backend exposes update and delete reminder endpoints, but the page has no reminder list endpoint to support full management yet. The client helpers `updateReminder` and `deleteReminder` in `frontend/app/lib/api.ts`, and the `Reminder` type in `frontend/app/types/index.ts`, are defined but not used by any component (see `docs/code-bugs.md` CB-13).
 
-### How reminders work card
+### Reminder copy
 
-The reminder tab shows a `How reminders work` card with four bullets. The last bullet reads `You can update or delete a reminder any time before it fires.` That statement is not true of the UI: no control updates or deletes a reminder. Known issue — see `docs/code-bugs.md` CB-08.
+The redesign removed the `How reminders work` card, including its false last bullet (`You can update or delete a reminder any time before it fires.`, CB-08). The form now shows the hint `We'll email you on this date with the application details.`.
 
 ### Upcoming reminders placeholder
 
-The reminder tab shows an `Upcoming reminders` card, but it is a static empty placeholder (`No reminders set for this application`) because there is no list-reminders endpoint currently. It shows this text even when the application has reminders.
+The reminder tab shows an `Upcoming` column, but it is a static empty placeholder (`No reminders set for this application`) because there is no list-reminders endpoint currently. It shows this text even when the application has reminders.
 
 ### Important: UTC date handling
 
@@ -761,17 +731,16 @@ It is configured in `backend/src/jobs/reminderJob.ts` and started by `startRemin
 
 ## 9. Known Limitations
 
-- `STATUS_LABELS`, `SOURCE_LABELS`, date helpers, and status color maps are still local to application pages.
 - The applications list has no pagination, filter, or search.
 - The reminder UI cannot view, edit, or delete existing reminders because there is no list-reminders endpoint.
-- The upcoming reminders card is currently a placeholder.
+- The `Upcoming` column on the Reminder tab is currently a placeholder.
 - UTC/IST mismatch can cause same-day reminders set late at night to be missed.
 - If the backend server is down at 9am, that day's reminders are missed because there is no retry mechanism.
 - `suggestions` is part of the `ResumeAnalysis` type but is always empty. `POST /api/ai/analyze-resume` returns `[]` and `GET /api/ai/resume-analysis/:appId` returns the string `"[]"` (CB-07).
-- The list page's header chip, its card badge, the dashboard, and the backend stat each define "stale" differently (CB-04).
-- `PUT /api/reminders/:id` does not reset `isSent` (CB-10), and the Reminder tab text promises update and delete controls that do not exist (CB-08).
+- The list page's header count, its card label, the dashboard, and the backend stat each define "stale" differently (CB-04).
+- `PUT /api/reminders/:id` does not reset `isSent` (CB-10).
 - The pre-filled `dateApplied` on the create page is the UTC date, which is the previous day in India between 00:00 and 05:30 IST.
-- The overflow menu's `Edit details` item is disabled. Company, title, source, and job description cannot be edited in the UI.
+- The three-dot menu's `Edit details` item is disabled. Company, title, source, and job description cannot be edited in the UI.
 - Resume upload replaces every cached saved analysis with `null`; the detail page reflects that cache update without needing a refresh.
 - Applications created before `companyDomain` existed have no domain and show letter avatars. There is no UI to add or edit a domain on an existing application.
 - The update endpoint ignores an empty `companyDomain`, so a stored domain cannot be cleared through the API.

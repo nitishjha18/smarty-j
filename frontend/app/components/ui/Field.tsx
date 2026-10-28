@@ -6,7 +6,7 @@ import type {
 import { cn } from "../../lib/cn"
 
 const CONTROL =
-  "w-full bg-surface border border-line rounded-btn px-3 text-sm text-ink placeholder:text-faint transition-shadow focus:outline-none focus:border-brand focus:shadow-focus disabled:bg-surface-alt disabled:text-muted"
+  "block w-full bg-surface border border-line rounded-btn px-3 text-sm text-ink placeholder:text-faint transition-shadow focus:outline-none focus:border-brand focus:shadow-focus disabled:bg-surface-alt disabled:text-muted"
 
 export function Label({
   className,
@@ -14,7 +14,7 @@ export function Label({
 }: LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
-      className={cn("block text-sm2 font-medium text-ink mb-1.5", className)}
+      className={cn("block text-sm2 font-medium text-ink mb-2", className)}
       {...props}
     />
   )
@@ -24,7 +24,7 @@ export function Input({
   className,
   ...props
 }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cn(CONTROL, "h-10", className)} {...props} />
+  return <input className={cn(CONTROL, "h-11", className)} {...props} />
 }
 
 export function Textarea({
@@ -33,7 +33,7 @@ export function Textarea({
 }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
-      className={cn(CONTROL, "py-2.5 leading-relaxed resize-y", className)}
+      className={cn(CONTROL, "py-3 leading-normal resize-y", className)}
       {...props}
     />
   )

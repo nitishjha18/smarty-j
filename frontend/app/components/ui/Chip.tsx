@@ -4,16 +4,18 @@ import { cn } from "../../lib/cn"
 /** Toggle chip: source picker, quick-date picker. */
 export default function Chip({
   selected = false,
+  compact = false,
   className,
   type = "button",
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { selected?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { selected?: boolean; compact?: boolean }) {
   return (
     <button
       type={type}
       aria-pressed={selected}
       className={cn(
-        "h-8 px-3 rounded-ctl border text-sm2 font-medium transition-colors",
+        "px-3 rounded-ctl border text-sm2 font-medium transition-colors",
+        compact ? "py-1.5" : "py-[7px]",
         selected
           ? "border-brand bg-brand-tint-bg text-brand"
           : "border-line bg-surface text-ink hover:border-line-strong",
@@ -32,7 +34,7 @@ export function Tag({
   return (
     <span
       className={cn(
-        "inline-flex items-center h-7 px-2.5 rounded-chip bg-brand-tint text-brand-dark text-xs font-medium",
+        "inline-flex items-center px-2.5 py-[5px] rounded-chip bg-brand-tint text-brand-dark text-sm2 font-medium",
         className
       )}
       {...props}
