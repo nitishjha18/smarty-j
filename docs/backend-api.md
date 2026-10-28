@@ -4,9 +4,9 @@ This document is the complete reference for the ApplynTrack backend API.
 It is written for frontend developers and AI assistants building the frontend.
 Do not modify the backend based on this document. The backend implementation is the source of truth.
 
-Last updated: October 2026
+Last updated: October 29, 2026
 
-Where the backend behaves differently from what a contract would normally promise, this document describes the real behavior and links to the matching entry in `docs/code-bugs.md`.
+Where the backend behaves differently from what a contract would normally promise, this document describes the real behavior and lists the gap under "Remaining Backend Work".
 
 ---
 
@@ -70,7 +70,11 @@ Every endpoint can also return one of these shared error shapes. The body is alw
 | 500 | `Internal server error` | Any unhandled error. Internal details (Prisma, Gemini, stack traces) are not exposed. |
 | 503 | `AI analysis is temporarily unavailable. Please try again in a moment.` | Gemini call, JSON parse, or shape validation failed on an AI endpoint. |
 
-Every response also includes an `X-Request-Id` header that correlates with backend logs.
+Every response also includes an `X-Request-Id` header that correlates with backend logs. The backend reuses an incoming `X-Request-Id` request header when present and generates a UUID otherwise.
+
+How errors are produced: controllers and services throw an `AppError` (`backend/src/utils/AppError.ts`) with an explicit status code and a client-safe message, or let any other error propagate. One global Express error handler (`backend/src/middleware/errorHandler.ts`) turns the error into the response. It is registered after all routes, behind a JSON `404 { "error": "Route not found" }` handler for unknown routes. Errors with status 500 or higher are logged at `error` level with the stack; lower statuses are logged at `warn`. Request bodies, the `Authorization` header and cookies are never logged.
+
+Input validation is limited to a few manual required-field checks (listed per endpoint below). There is no schema validator, so a wrongly typed value is only caught when Prisma rejects it, which returns `400 { "error": "Invalid request data" }`.
 
 For all protected routes except `/api/user/sync`, the backend also requires a matching local database user. If the Clerk user exists but has not been synced locally, the backend returns:
 
@@ -176,8 +180,8 @@ updatedAt
 Notes:
 
 - The database stores `missingKeywords`, `strongestPoints`, `redFlags`, and `suggestions` as JSON strings.
-- API responses parse `missingKeywords`, `strongestPoints` and `redFlags` into arrays. `suggestions` is parsed by the POST response only (see below).
-- `suggestions` is always stored as the JSON string `"[]"` and is reserved for future use. `POST /api/ai/analyze-resume` returns it as an empty array, but `GET /api/ai/resume-analysis/:appId` returns the raw string `"[]"` because the GET path does not parse it. Known issue — see `docs/code-bugs.md` CB-07.
+- API responses parse `missingKeywords`, `strongestPoints`, `redFlags` and `suggestions` into arrays, in both the POST and the GET response.
+- `suggestions` is always stored as the JSON string `"[]"` and is reserved for future use; both endpoints return it as an empty array.
 - There is at most one `ResumeAnalysis` per application. Re-running analysis overwrites the previous saved result.
 
 ### Reminder
@@ -255,7 +259,13 @@ Response 401:
 { "error": "Unauthorized" }
 ```
 
-Response 500:
+Response 400 when the Clerk user has no email address:
+
+```json
+{ "error": "Clerk user has no email address" }
+```
+
+Response 500 (for example when the Clerk API call fails):
 
 ```json
 { "error": "Internal server error" }
@@ -301,7 +311,7 @@ Response 500:
 { "error": "Internal server error" }
 ```
 
-The controller also contains a `404 { "error": "User not found" }` branch, but `requireUser` runs first, so that response is effectively never returned. See `docs/code-bugs.md` CB-14.
+The controller also contains a `404 { "error": "User not found" }` branch, but `requireUser` runs first, so that response is effectively never returned.
 
 ---
 
@@ -342,6 +352,8 @@ Response 200:
 ```
 
 Response 401 and 500: same as Get User Profile (`Unauthorized`; `User not found. Please sync first.`; `Internal server error`).
+
+The controller does not validate the body. Fields are passed straight to Prisma, so an empty string is saved as-is and a non-string value returns `400 { "error": "Invalid request data" }`.
 
 ---
 
@@ -785,7 +797,7 @@ Response 200 when analysis exists:
       "The resume does not clearly show production cloud deployment experience."
     ],
     "recruiterTake": "A promising backend candidate, but the resume should show stronger evidence of cloud and scaling experience.",
-    "suggestions": "[]",
+    "suggestions": [],
     "createdAt": "2026-09-20T01:22:57.000Z",
     "updatedAt": "2026-09-20T01:22:57.000Z"
   }
@@ -863,6 +875,8 @@ Response 400:
 { "error": "applicationId and reminderDate are required" }
 ```
 
+An unparseable `reminderDate` becomes an invalid `Date`, which Prisma rejects: `400 { "error": "Invalid request data" }`.
+
 Response 404:
 
 ```json
@@ -890,7 +904,7 @@ Required: `reminderDate`
 
 Optional: `notes`
 
-This endpoint updates only `reminderDate` and `notes`. It does not reset `isSent`, so a reminder that has already been sent stays `isSent: true` after a reschedule, and the cron job (which selects only `isSent: false`) never sends it again. Known issue — see `docs/code-bugs.md` CB-10.
+This endpoint updates only `reminderDate` and `notes`. It does not reset `isSent`, so a reminder that has already been sent stays `isSent: true` after a reschedule, and the cron job (which selects only `isSent: false`) never sends it again.
 
 Response 200:
 
@@ -986,7 +1000,7 @@ Field notes:
 - `responseRate` is the percentage of applications that moved past `APPLIED`.
 - `rejectionRate` is the percentage of applications with `REJECTED` status.
 - `bestSource` is the `ApplicationSource` enum value with the most non-`APPLIED` applications, or `null` if there are no responses.
-- `staleApplications` counts applications with status `APPLIED` whose `dateApplied` is earlier than the current time minus 14 days (server local time, strict `<`). The frontend does not use this field; the dashboard computes its own count. The product has five different "stale" definitions — see `docs/code-bugs.md` CB-04.
+- `staleApplications` counts applications with status `APPLIED` whose `dateApplied` is earlier than the current time minus 14 days (server local time, strict `<`). The frontend does not use this field; the dashboard computes its own count. The product defines "stale" in several slightly different ways (this stat, the dashboard page, and the Applications board's header count and card label), so the numbers can disagree.
 - Unexpected failures are mapped by the global error handler (see the top of this document).
 - Rates are rounded integers from 0 to 100.
 
@@ -996,19 +1010,19 @@ Field notes:
 
 The following items are intentionally deferred until after the functional frontend is complete. Do not implement these during frontend development unless the backend task explicitly asks for them.
 
-- Input validation with Zod or a similar validator. Request body validation is currently manual and incomplete (CB-01).
-- `.gitignore` cleanup. `backend/dist` and `backend/src/generated/prisma` are tracked in git, and the backend ignore file lists the wrong Prisma path (CB-03).
-- Unused backend dependencies (CB-11).
-- Automated tests. No backend test suite exists yet (CB-01).
-- Reminder content hardening. HTML user text is not escaped (CB-09) and `PUT /api/reminders/:id` does not reset `isSent` (CB-10).
-
-All items are tracked in `docs/code-bugs.md`.
+- Input validation with Zod or a similar validator. Validation is limited to the manual required-field checks described per endpoint; everything else relies on Prisma rejecting bad values with `400 Invalid request data`.
+- `.gitignore` cleanup. `backend/.gitignore` lists `/generated/prisma`, but the generated client lives at `backend/src/generated/prisma`, and no `.gitignore` excludes `backend/dist`.
+- Unused backend dependencies: `axios`, `jsonwebtoken`, `@types/jsonwebtoken` and `@types/pdf-parse` are not imported anywhere in `backend/src`.
+- Automated tests. No backend test suite or test script exists.
+- Resume upload: the PDF check trusts the client-declared mimetype (`req.file.mimetype`), not the file contents.
+- Reminder content hardening. The reminder email HTML inserts the user's name, job title, company name and note without escaping, and `PUT /api/reminders/:id` does not reset `isSent`.
+- `getProfileController` has a `404 User not found` branch that is unreachable because `requireUser` runs first.
 
 ---
 
 ## Notes For Frontend Development
 
-- Never hardcode `http://localhost:5000`; always use `process.env.NEXT_PUBLIC_API_URL`. The frontend itself falls back to `http://localhost:5000` when the variable is missing (CB-05).
+- Never hardcode `http://localhost:5000`; always use `process.env.NEXT_PUBLIC_API_URL`. The frontend itself falls back to `http://localhost:5000` when the variable is missing, so a missing value fails silently in a deployment. `frontend/next.config.ts` also rewrites `/api/*` to `http://localhost:5000` and lists a personal ngrok host in `allowedDevOrigins`.
 - Never send `userId` from the frontend. The backend reads the user from the Clerk token and local database.
 - The protected frontend layout runs the shared `POST /api/user/sync` query after sign-in; other frontend queries wait for it to succeed.
 - The `requireUser` middleware attaches the local DB user to the request for protected routes.

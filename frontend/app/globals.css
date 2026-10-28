@@ -1,25 +1,124 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Design tokens for the ApplynTrack redesign. Values come from the design
+ * source (Main.dc.html / Dashboard.dc.html), not from screenshots.
+ * Use these utilities (bg-brand, text-ink, rounded-card, shadow-card, ...)
+ * instead of one-off hex values in pages.
+ */
+@theme {
+  /* Neutrals */
+  --color-ink: #171717;
+  --color-body: #525252;
+  --color-muted: #737373;
+  --color-faint: #a3a3a3;
+  --color-surface: #ffffff;
+  --color-surface-alt: #faf8f6;
+  --color-surface-hover: #f5f5f5;
+  --color-sidebar: #fff8f4;
+  --color-line: #ede7e3;
+  --color-line-dashed: #e3dcd7;
+  --color-line-strong: #d4cfcb;
+
+  /* Brand orange */
+  --color-brand: #f25a1d;
+  --color-brand-hover: #e04e14;
+  --color-brand-active: #cc4410;
+  --color-brand-logo: #ff6b35;
+  --color-brand-tint: #ffe6da;
+  --color-brand-tint-bg: #fff4ee;
+  --color-brand-border: #ffcdb5;
+  --color-brand-dark: #c2410c;
+  --color-brand-darker: #a8340a;
+  --color-warm-card: #ffebd6;
+  --color-warm-border: #ffc99a;
+  --color-peach: #ffd8ae;
+  --color-brand-accent: #d9480f;
+  --color-ink-soft: #3f3f3f;
+
+  /* Feedback */
+  --color-danger: #e11d48;
+  --color-danger-tint: #fff1f2;
+  --color-success: #16a34a;
+  --color-success-tint: #f0fdf4;
+  --color-success-soft: #dcfce7;
+
+  /* Status colors: dot/bar, light tint, readable text */
+  --color-st-applied: #3b82f6;
+  --color-st-applied-tint: #eff6ff;
+  --color-st-applied-text: #2563eb;
+  --color-st-screening: #d97706;
+  --color-st-screening-tint: #fef3c7;
+  --color-st-screening-text: #b45309;
+  --color-st-interview: #8b5cf6;
+  --color-st-interview-tint: #f5f3ff;
+  --color-st-interview-text: #6d28d9;
+  --color-st-assignment: #0d9488;
+  --color-st-assignment-tint: #f0fdfa;
+  --color-st-assignment-text: #0f766e;
+  --color-st-offer: #16a34a;
+  --color-st-offer-tint: #f0fdf4;
+  --color-st-offer-text: #15803d;
+  --color-st-rejected: #e11d48;
+  --color-st-rejected-tint: #fff1f2;
+  --color-st-rejected-text: #be123c;
+
+  /* Radii (named, so Tailwind's default rounded-* scale is untouched) */
+  --radius-chip: 6px;
+  --radius-ctl: 8px;
+  --radius-btn: 10px;
+  --radius-card: 12px;
+  --radius-modal: 16px;
+
+  /* Shadows */
+  --shadow-card: 0 1px 2px rgba(23, 23, 23, 0.04);
+  --shadow-cta: 0 2px 8px rgba(242, 90, 29, 0.28);
+  --shadow-hero-cta: 0 10px 24px -8px rgba(23, 23, 23, 0.28);
+  --shadow-pop: 0 8px 24px rgba(23, 23, 23, 0.1);
+  --shadow-modal: 0 24px 64px rgba(23, 23, 23, 0.18);
+  --shadow-focus: 0 0 0 3px #ffe6da;
+
+  /* Type */
+  --text-micro: 10px;
+  --text-mono: 11px;
+  --text-sm2: 13px;
+  --tracking-eyebrow: 0.14em;
+  --tracking-tight-display: -0.04em;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-hand: var(--font-caveat), cursive;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+/* Thin light scrollbars (board and lanes). */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-dashed) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-line-dashed);
+  border-radius: 3px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
 }

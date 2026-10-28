@@ -69,9 +69,9 @@ NEXT_PUBLIC_BRANDFETCH_CLIENT_ID
 
 `LOG_LEVEL` controls the Pino log level on the backend (`trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent`). Defaults to `info` when unset. Set `NODE_ENV=production` to switch Pino from pretty-printed output to plain JSON.
 
-`CLERK_SECRET_KEY` is read by Clerk in the Next.js `middleware.ts`, which protects every route except `/`, `/sign-in` and `/sign-up`. `NEXT_PUBLIC_API_URL` falls back to `http://localhost:5000` when it is not set, so a missing value fails silently in a deployment (known issue — see CB-05 in `docs/code-bugs.md`). The optional `NEXT_PUBLIC_CLERK_SIGN_IN_URL`, `NEXT_PUBLIC_CLERK_SIGN_UP_URL`, `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` and `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` variables are read by Clerk and are not referenced in the app code.
+`CLERK_SECRET_KEY` is read by Clerk in the Next.js `middleware.ts`, which protects every route except `/`, `/sign-in` and `/sign-up`. `NEXT_PUBLIC_API_URL` falls back to `http://localhost:5000` when it is not set, so a missing value fails silently in a deployment. The optional `NEXT_PUBLIC_CLERK_SIGN_IN_URL`, `NEXT_PUBLIC_CLERK_SIGN_UP_URL`, `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` and `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` variables are read by Clerk and are not referenced in the app code.
 
-`NEXT_PUBLIC_BRANDFETCH_CLIENT_ID` is the free client ID from the Brandfetch developer portal (developers.brandfetch.com). It powers company logos and company-name search. It is a public identifier, not a secret. Without it the app still works and shows letter avatars instead of logos. Restart the frontend dev server after adding it.
+`NEXT_PUBLIC_BRANDFETCH_CLIENT_ID` is the free client ID from the Brandfetch developer portal (developers.brandfetch.com). It powers company logos (in the app and on the landing page mockups) and company-name search. It is a public identifier, not a secret. Without it the app still works and shows letter avatars instead of logos. Next.js inlines `NEXT_PUBLIC_*` variables at build time, so set it in the environment before building the frontend for production, and restart the dev server after adding it locally.
 
 ## Useful Files
 
@@ -80,8 +80,7 @@ NEXT_PUBLIC_BRANDFETCH_CLIENT_ID
 - `docs/modules/applications.md` — applications module
 - `docs/modules/dashboard.md` — dashboard module
 - `docs/modules/profile.md` — profile module
-- `docs/code-bugs.md` — known code and repo issues, deferred
-- `before-beta.md` — checklist of work to finish before a beta launch
+- `docs/modules/landing.md` — public landing page
 - `prd.md` — product requirements (kept local, listed in `.gitignore`)
 
 See [Client-side data fetching and caching](docs/architecture.md#client-side-data-fetching-and-caching) for the frontend query and cache design.

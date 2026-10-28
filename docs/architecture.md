@@ -1,7 +1,7 @@
 # ApplynTrack — Technical Architecture
 
 **Document location:** `docs/architecture.md`
-**Last updated:** October 2026
+**Last updated:** October 29, 2026
 **Author:** Nitish Jha
 
 ---
@@ -46,6 +46,7 @@ Express REST API (Node.js)
 | Language | TypeScript | Type safety across the frontend-backend boundary. Field name mismatches become compile errors. |
 | Styling | Tailwind CSS 4 | Utility-first, no context switching between CSS files and components. |
 | Auth | Clerk (`@clerk/nextjs`) | Handles Google OAuth, token issuance, session management, and route protection with minimal configuration. |
+| Board drag-and-drop | `@dnd-kit/core` + `@dnd-kit/utilities` | Mouse, touch and keyboard sensors with accessible announcements, and auto-scroll, without a UI framework. Used only on the applications board. |
 | Client data | TanStack Query v5 | The provider creates one QueryClient for the browser session. It was chosen over SWR for its query-key factory, mutation cache APIs, and Devtools. |
 | Company logos | Brandfetch (Logo API + Brand Search API) | Free tier with no attribution requirement. Returned logos for the large Indian companies tested. Called directly from the browser. See Section 6b. |
 
@@ -62,6 +63,7 @@ Express REST API (Node.js)
 | AI | Google Gemini (`gemini-3.6-flash`) | Available via REST API, no self-hosting required, free tier sufficient for development. Model selected by trial — earlier models (1.5-flash, 2.0-flash) returned 404 at the time of development. The model name is hardcoded in `backend/src/config/gemini.ts`. |
 | Email | Resend | Simple REST API for transactional email. Custom domain (applyntrack.online) verified for professional sender identity. |
 | File storage | Supabase Storage | Already using Supabase for the database. Using the same platform for file storage avoids a second vendor. |
+| Logging | Pino + pino-http (`pino-pretty` in development) | Structured JSON logs with a per-request id, redacted `Authorization` and `Cookie` headers, and level control through `LOG_LEVEL`. See Section 11. |
 | Scheduler | node-cron | Runs inside the Express process. No external scheduler (like Vercel Cron or AWS EventBridge) required. Acceptable for a monolith deployed on a single Railway instance. |
 
 ---
@@ -77,16 +79,24 @@ API calls: all calls to the Express backend go through `frontend/app/lib/api.ts`
 Auth: `useAuth()` provides `getToken()`. Every query and mutation gets a fresh token immediately before its API call. `useUserSync()` is enabled only for a loaded, signed-in Clerk user; all other queries are enabled only after that shared sync query succeeds. `useUser()` provides user display name for the greeting.
 
 Component structure:
-- `components/Sidebar.tsx` — shared across all protected pages via the protected layout
+- `components/Sidebar.tsx` — shared across all protected pages via the protected layout: a 240px sidebar from `lg` up, and a top bar with a menu button and slide-in drawer below `lg`. The footer shows the user's avatar, name and email with a sign-out button.
+- `components/BrandLogo.tsx` — orange check tile and wordmark, used by the sidebar, the landing navbar and footer
+- `components/ui/` — shared UI primitives (`Button`, `Card`, `Chip`, `Tag`, `Field` inputs, `Modal`, `Tabs`, `Stepper`, `ScoreMeter`, `StatusBadge` family, `Eyebrow`, `Avatar`, `EmptyState`)
+- `lib/status.ts`, `lib/dates.ts`, `lib/cn.ts` — shared status maps and color classes, date helpers, and a class joiner
+- `(marketing)/` — public landing page: `layout.tsx` (navbar and footer), `page.tsx`, and `_components/` (Navbar, Footer, Hero, OldWay, Track, AiFit, FollowUp, Steps, ClosingCta, plus sample data and mockup primitives). See `docs/modules/landing.md`.
 - `components/Skeleton.tsx` — neutral first-load placeholder primitive
-- `components/CompanyLogo.tsx` — company logo with letter-avatar fallback, used on the board, detail page, dashboard, and the create form
+- `components/CompanyLogo.tsx` — company logo with letter-avatar fallback, used on the board, detail page, dashboard, create form and the landing-page mockups
 - `components/CompanySearchInput.tsx` — company name autocomplete on the create page, backed by the Brandfetch Brand Search API
 - `providers.tsx` — QueryClient provider and development-only React Query Devtools
 - Every data-driven page and the protected layout are client components (`"use client"`)
-- Server components are used only for static shells with no data fetching: the root `app/layout.tsx`, the home page `app/page.tsx` (currently a placeholder that renders only a `Job Tracker` heading; see `docs/code-bugs.md` CB-15), the sign-in page, and `components/Skeleton.tsx`
+- Server components are used only for static shells with no data fetching: the root `app/layout.tsx`, the landing page `app/(marketing)/page.tsx` and its sections (only `Navbar` is a client component, for its scroll state), the sign-in page, and `components/Skeleton.tsx`
 - Route protection is also enforced in `frontend/middleware.ts` (Clerk `clerkMiddleware`): every route except `/`, `/sign-in(.*)` and `/sign-up(.*)` calls `auth.protect()`
 
-Design system: Inter is applied at the root. The shell and dashboard use orange `#FC8019`, with white surfaces, `#F4F5F7` page background, `#111827` primary text, and `#6B7280` secondary text. Borders use `#E5E7EB` or `#F0F1F4`; active navigation uses `#FFF4EC`. Statuses use blue, amber, purple, orange, green, and rose/red accents. Individual form and detail controls also use local orange values. The application is light-mode oriented, although `globals.css` defines a dark system-color override.
+Design system: colors, radii, shadows and type are design tokens defined once under `@theme` in `app/globals.css` and used as Tailwind utilities (`bg-brand`, `text-ink`, `border-line`, `rounded-card`, `shadow-pop`, `bg-st-applied`). The brand color is orange `#F25A1D` (hover `#E04E14`), with ink `#171717`, muted `#737373`, warm borders `#EDE7E3`, a sidebar tint `#FFF8F4`, and a peach landing background `#FFD8AE`. Each status has a color, tint and text variant: Applied blue, Screening amber, Interview purple, Assignment teal, Offer green, Rejected rose. Fonts are Geist (UI), Geist Mono (eyebrows and meta), and Caveat (handwritten landing annotations), loaded with `next/font/google` in `app/layout.tsx`. The app is light-mode only; the earlier dark system-color override was removed.
+
+Presentation of detail and create: `/applications/new` and `/applications/[id]` render the applications board and then a `Modal` on top of it. They stay real routes (shareable URLs, browser back works), and closing navigates away instead of toggling state.
+
+Routing: `/` is the public landing page (`app/(marketing)/page.tsx`). Its calls to action go to `/sign-in`.
 
 ---
 
@@ -240,7 +250,7 @@ The original reasoning was to avoid fetching all applications on the frontend ju
 In the current frontend that reasoning only partly holds:
 
 1. The dashboard page does fetch the full applications list (`useApplications()`) in addition to the stats, because it derives the pipeline strip, the stale list, Recent Activity, and the calendar from it on the client.
-2. The page reads only `totalApplications` from the stats response. The stale list it shows is computed on the client, not taken from `stats.staleApplications`, so the stale rule exists in more than one place and the copies can disagree (see `docs/code-bugs.md` CB-04).
+2. The page reads only `totalApplications` from the stats response. The stale list it shows is computed on the client, not taken from `stats.staleApplications`, so the stale rule exists in more than one place and the copies can disagree (see "Several definitions of stale" in Section 11).
 
 The endpoint is therefore a small, cheap summary, and its other fields (`responseRate`, `rejectionRate`, `bestSource`, `staleApplications`) are reserved for a future Analytics page.
 
@@ -272,9 +282,9 @@ The userId is derived exclusively from the Clerk JWT on the backend. The `requir
 
 `Providers` creates one QueryClient for the browser session. Queries are fresh for 60 seconds, garbage-collected after five minutes, refetch on window focus, and retry once; mutations do not retry. The user-sync query is fresh indefinitely. Other server-data hooks wait until that sync query succeeds, so protected requests are not issued before the local user exists.
 
-Mutation cache handling is explicit: creating an application invalidates applications and dashboard stats; updating one writes its detail result, then invalidates applications and stats; deleting one removes its detail and analysis entries, filters it from the applications cache, and invalidates stats. Resume analysis writes its returned analysis to the matching key. Profile updates write their returned user to the profile key. Resume upload writes the returned resume fields into the profile key and replaces every cached resume analysis for that user with `null`. The sidebar clears the whole QueryClient before Clerk sign-out.
+Mutation cache handling is explicit: creating an application invalidates applications and dashboard stats; updating one writes its detail result, then invalidates applications and stats; moving one on the board (`useMoveApplication`) first moves it optimistically in the applications cache and rolls that one application back on failure, then does the same detail write and invalidations as an update; deleting one removes its detail and analysis entries, filters it from the applications cache, and invalidates stats. Resume analysis writes its returned analysis to the matching key. Profile updates write their returned user to the profile key. Resume upload writes the returned resume fields into the profile key and replaces every cached resume analysis for that user with `null`. The sidebar clears the whole QueryClient before Clerk sign-out.
 
-Application detail uses the matching item from the applications cache as placeholder data while its detail query resolves. Forms initialize editable fields once from fetched data, so a refetch does not overwrite typing. Status changes wait for the mutation response rather than applying an optimistic update. Skeletons represent an initial load only, while cached or placeholder data remains visible during a refetch.
+Application detail uses the matching item from the applications cache as placeholder data while its detail query resolves. Forms initialize editable fields once from fetched data, so a refetch does not overwrite typing. On the detail page, status changes wait for the mutation response rather than applying an optimistic update; only the board's drag-and-drop (`useMoveApplication`) updates the cache optimistically. Skeletons represent an initial load only, while cached or placeholder data remains visible during a refetch.
 
 ---
 
@@ -319,13 +329,13 @@ JOB DESCRIPTION:
 [job description]
 ```
 
-`[experienceLevel]` falls back to `fresher` and `[targetRole]` to `software` when the profile fields are empty. The response is cleaned of markdown fences and parsed as JSON; the parsed values are not validated, so malformed Gemini output surfaces as a thrown error. The parsed Gemini result is combined with the locally computed missing keywords, then saved through a Prisma upsert:
+`[experienceLevel]` falls back to `fresher` and `[targetRole]` to `software` when the profile fields are empty. The response is cleaned of markdown fences, parsed as JSON, and checked for the expected shape (`matchScore` is a number, `strongestPoints` and `redFlags` are arrays, `recruiterTake` is a string). The parsed Gemini result is combined with the locally computed missing keywords, then saved through a Prisma upsert:
 
 - `matchScore` is stored as an integer.
 - `missingKeywords`, `strongestPoints`, `redFlags`, and `suggestions` are stored as JSON strings because the Prisma model uses `String` columns for those fields.
-- `POST /api/ai/analyze-resume` parses all four JSON strings back into arrays. `GET /api/ai/resume-analysis/:appId` parses `missingKeywords`, `strongestPoints`, and `redFlags` but not `suggestions`, so it returns `"suggestions": "[]"` as a string. The frontend does not read the field (known issue — `docs/code-bugs.md` CB-07).
+- Both `POST /api/ai/analyze-resume` and `GET /api/ai/resume-analysis/:appId` parse all four JSON strings back into arrays. The frontend does not read `suggestions`.
 - `suggestions` currently stores `[]` and is reserved for future expansion.
-- Any `Error` thrown while analysing, including a Gemini or database failure, is returned to the client as `400` with the raw message (`docs/code-bugs.md` CB-01).
+- Expected failures use `AppError`: no resume or no job description is `400`, an unknown application is `404`. Any Gemini failure (network error, bad API key, overload, invalid JSON, wrong shape) is logged server-side and returned as `503 "AI analysis is temporarily unavailable. Please try again in a moment."`; the Gemini error text never reaches the client.
 
 ### Why ResumeAnalysis Is Saved
 
@@ -344,7 +354,7 @@ Application cards show the company's logo. Two Brandfetch APIs are involved, bot
 | API | Input | Used in | Runs when |
 |---|---|---|---|
 | Brand Search | Typed company name | `CompanySearchInput` on the create page | While typing, after 2+ characters and a 300 ms pause |
-| Logo API | Domain, e.g. `zomato.com` | `CompanyLogo` on the board, detail page, and dashboard | Whenever a card for an application with a stored domain renders |
+| Logo API | Domain, e.g. `zomato.com` | `CompanyLogo` on the board, detail page, dashboard, and the landing-page mockups (hard-coded sample domains) | Whenever a card for an application with a stored domain renders |
 
 ### Flow
 
@@ -382,7 +392,7 @@ The query finds all Reminder records where:
 - `reminderDate` is within today's UTC date range
 - `isSent` is false
 
-After sending each email, the record is updated with `isSent: true`. This prevents duplicate sends if the job runs again (which it shouldn't, but the field guards against edge cases). Each send is wrapped in its own try/catch, so one failed email does not stop the others. The callback as a whole has no outer try/catch, so a failure in the initial reminder query is not handled (`docs/code-bugs.md` CB-01). `PUT /api/reminders/:id` does not reset `isSent`, so a reminder that was already sent and then rescheduled is never sent again (`docs/code-bugs.md` CB-10).
+After sending each email, the record is updated with `isSent: true`. This prevents duplicate sends if the job runs again (which it shouldn't, but the field guards against edge cases). Each send is wrapped in its own try/catch, so one failed email does not stop the others, and the whole callback is wrapped in a try/catch so a failure in the initial reminder query is logged instead of becoming an unhandled rejection. `PUT /api/reminders/:id` does not reset `isSent`, so a reminder that was already sent and then rescheduled is never sent again.
 
 ### Why node-cron Instead of an External Scheduler
 
@@ -394,7 +404,7 @@ The trade-off is that if the server is down at 9am, reminders for that day are m
 
 The Resend SDK sends transactional email via their REST API. The `from` address is read from the `RESEND_FROM_EMAIL` environment variable (`backend/src/utils/email.ts`); it is not hardcoded. The domain `applyntrack.online` was verified on Resend by adding DKIM, SPF, and DMARC DNS records on Hostinger.
 
-The subject is `Reminder — {jobTitle} at {companyName}`, and the body greets the user with their full stored name. Emails are sent as HTML with inline styles. The name, job title, company name, and note are inserted into the HTML without escaping (`docs/code-bugs.md` CB-09). A plain `text` fallback is not currently included — email clients that don't render HTML will see nothing. This is a known gap.
+The subject is `Reminder — {jobTitle} at {companyName}`, and the body greets the user with their full stored name. Emails are sent as HTML with inline styles. The name, job title, company name, and note are inserted into the HTML without escaping. The email's header and accent colors are indigo (`#4F46E5`), not the app's orange. A plain `text` fallback is not currently included — email clients that don't render HTML will see nothing. This is a known gap.
 
 ---
 
@@ -408,7 +418,7 @@ Files are stored in a public bucket named `resumes`. Each user's file is stored 
 
 `upsert: true` is set on upload, which overwrites the file if it already exists. This supports the use case of re-uploading an updated resume without leaving orphaned files.
 
-The bucket is public, so anyone with a resume URL can read the file. `multer` is configured with memory storage and no `limits`, so the upload has no size cap, and a multer error is not caught by the controller (known issue — `docs/code-bugs.md` CB-02).
+The bucket is public, so anyone with a resume URL can read the file. `multer` is configured with memory storage and a 5 MB file-size limit. A file over the limit is rejected by the global error handler as `413 "File is too large. Maximum size is 5 MB."`, and other multer errors become `400 "Invalid file upload"`. The controller also rejects PDFs that `pdf2json` cannot parse and PDFs with no extractable text (both `400`) before anything is uploaded to storage.
 
 ### pdf2json
 
@@ -444,15 +454,15 @@ The extracted text is stored in `User.resumeText`. It is not cleaned or normaliz
 
 ### Zod Input Validation
 
-No request body validation exists. Prisma will reject fields that don't match the schema type but will not validate business rules like required fields or enum values. Invalid input can produce unhelpful Prisma error messages. Zod schemas for each endpoint's request body are planned for the hardening phase (`docs/code-bugs.md` CB-01).
+There is no schema validation of request bodies. Controllers check only a few required fields by hand (`companyName`, `jobTitle` and `source` on create application; `applicationId` on analyze; `applicationId` and `reminderDate` on create reminder; `reminderDate` on update reminder). Everything else, including enum values and dates, relies on Prisma rejecting bad values, which the global error handler returns as `400 "Invalid request data"`. Zod schemas for each endpoint's request body are planned for the hardening phase.
 
 ### Automated Tests
 
-No unit tests, integration tests, or end-to-end tests exist in either project, and neither `package.json` has a test script. The application was tested manually in Postman during development. Tests are required before the codebase is considered production-ready (`docs/code-bugs.md` CB-01, `before-beta.md` §6.5).
+No unit tests, integration tests, or end-to-end tests exist in either project, and neither `package.json` has a test script. The application was tested manually in Postman during development. Tests are required before the codebase is considered production-ready.
 
 ### Mobile App
 
-Not in scope. The frontend is a desktop web application. Responsive design was not a priority in Phase 1.
+No native mobile app. The web frontend is responsive: the landing page has mobile layouts, and inside the app the sidebar collapses into a top bar with a menu drawer below the `lg` breakpoint. The applications board scrolls horizontally on narrow screens and supports touch drag-and-drop with a press-and-hold.
 
 ### Collaborative Features
 
@@ -468,52 +478,53 @@ The application is a monolith by design. At the current scale, the operational o
 
 ### UI Polish
 
-The frontend uses a consistent light-oriented shell, dashboard, application, and profile design with the `#FC8019` orange accent. The implementation is documented in `docs/modules/`.
+The frontend follows the redesigned ApplynTrack visual system (orange `#F25A1D` accent, Geist type, tokenized colors). The implementation is documented in `docs/modules/`.
 
 ---
 
 ## 11. Known Technical Debt
 
-### Global error handling and logging (resolved)
+### Global error handling and logging
 
-The backend now has a global Express error handler (`backend/src/middleware/errorHandler.ts`) and a JSON `404 { "error": "Route not found" }` handler for unknown routes. Service-layer errors are thrown as `AppError` with explicit status codes; Prisma validation errors, known request codes (P2025 → 404, P2002 → 409, P2003 → 400), multer errors (`LIMIT_FILE_SIZE` → 413 with the 5 MB message, others → 400), and malformed JSON (400 `"Invalid JSON in request body"`) all map to safe client messages. Unknown errors return `500 { "error": "Internal server error" }` — raw Prisma, Gemini, and stack traces never reach the client.
+The backend has a global Express error handler (`backend/src/middleware/errorHandler.ts`) and a JSON `404 { "error": "Route not found" }` handler for unknown routes, both registered after all routes in `index.ts`. Service-layer and controller errors are thrown as `AppError` (`backend/src/utils/AppError.ts`, with helpers `badRequest`, `unauthorized`, `notFound`, `conflict` and `serviceUnavailable`) carrying an explicit status code. Express 5 forwards rejected async handlers to the error handler, so controllers contain no try/catch. Prisma validation errors (400 `"Invalid request data"`), known Prisma request codes (P2025 → 404, P2002 → 409, P2003 → 400), multer errors (`LIMIT_FILE_SIZE` → 413 with the 5 MB message, others → 400 `"Invalid file upload"`), and malformed JSON (400 `"Invalid JSON in request body"`) all map to safe client messages. Anything else returns `500 { "error": "Internal server error" }` — raw Prisma, Gemini, and stack traces never reach the client. `requireUser` and `/health` respond directly rather than through the handler, with the same `{ "error": ... }` shape for the 401s.
 
-Logging uses Pino (`backend/src/config/logger.ts`) with `pino-http` for per-request logs. Every request gets a UUID request id, echoed as the `X-Request-Id` response header and attached to every log line for that request. `Authorization` and `Cookie` headers are redacted and request bodies are never logged. The `LOG_LEVEL` environment variable controls the level; pretty output is used outside `NODE_ENV=production`.
+Logging uses Pino (`backend/src/config/logger.ts`) with `pino-http` for per-request logs. Every request gets a request id: an incoming `X-Request-Id` header is reused, otherwise a UUID is generated, and it is echoed as the `X-Request-Id` response header and attached to every log line for that request. The request log records only the id, method, URL and remote address; the `Authorization` and `Cookie` request headers are redacted and request bodies are never logged. Errors with status 500 or higher are logged at `error` level with the error object; lower statuses are logged at `warn`. The `LOG_LEVEL` environment variable controls the level (default `info`); `pino-pretty` output is used outside `NODE_ENV=production`, plain JSON in production.
 
 Process-level handlers in `index.ts` log `unhandledRejection` at error level and `uncaughtException` at fatal level before exiting with code 1 so Railway restarts the process. The reminder cron callback is wrapped in a top-level try/catch so a database failure cannot become an unhandled rejection, and each per-reminder send is still isolated in its own try/catch.
 
-**No input validation** (CB-01)
-All endpoints accept arbitrary JSON bodies. Prisma rejects type mismatches but does not enforce required fields or valid enum values at the application layer.
+CORS allows the origin in `CLIENT_URL` (default `http://localhost:3000`) with credentials.
 
-**No automated tests** (CB-01)
+### Remaining debt
+
+**Limited input validation**
+Only the manual required-field checks listed in Section 10 exist. Prisma rejects type mismatches, bad enum values and invalid dates, and the client sees a generic `400 "Invalid request data"` with no field detail.
+
+**No automated tests**
 Neither project has tests or a test script.
 
-**Resume upload: PDF mimetype trust** (CB-02)
-A 5 MB file-size limit is enforced by `multer`, pdf2json parse failures and empty-text PDFs are rejected with explicit 400 messages, and multer errors are mapped by the global error handler. The PDF check still trusts the client-declared mimetype.
+**Resume upload: PDF mimetype trust**
+The 5 MB limit, parse failures and empty-text PDFs are all rejected with explicit messages, but the PDF check still trusts the client-declared mimetype.
 
-**Tracked build output and generated Prisma client** (CB-03)
-`backend/dist/` and `backend/src/generated/prisma/` are committed, `backend/.gitignore` lists the wrong generated path (`/generated/prisma`) and does not ignore `dist`, and the root `.gitignore` has no `.env*`, `node_modules` or `dist` rule.
+**Build output and generated Prisma client in the repo**
+`backend/dist/` and `backend/src/generated/prisma/` exist in the repository tree. `backend/.gitignore` lists `/generated/prisma` (not the real path `src/generated/prisma`) and no `.gitignore` excludes `dist`. The root `.gitignore` lists `node_modules` but not `.env*`; `backend/.gitignore` ignores `.env` and `frontend/.gitignore` ignores `.env*`.
 
-**Five definitions of "stale"** (CB-04)
-The backend stat, the dashboard page, the Applications header chip, the Applications card badge, and the PRD each define a stale application differently.
+**Several definitions of "stale"**
+The backend stat (`APPLIED` and `dateApplied` strictly more than 14 days ago, server local time), the dashboard page (`APPLIED` and whole days since `dateApplied` at least 14), the Applications board header count (`APPLIED` and elapsed time since `dateApplied` at least 14 days), the board's per-card `QUIET` label (any status, days since the last status change at least 14), and the PRD (no status change in fourteen plus days) each define it slightly differently, so the numbers can disagree.
 
-**Local API URL fallback** (CB-05)
-`frontend/app/lib/api.ts` falls back to `http://localhost:5000` when `NEXT_PUBLIC_API_URL` is missing, and `frontend/next.config.ts` contains a localhost API rewrite. Production deployment should provide the environment variable and review the rewrite so frontend API traffic points at the deployed backend.
+**Local API URL fallback**
+`frontend/app/lib/api.ts` falls back to `http://localhost:5000` when `NEXT_PUBLIC_API_URL` is missing, and `frontend/next.config.ts` contains a localhost API rewrite for `/api/*`. Production deployment should provide the environment variable and review the rewrite so frontend API traffic points at the deployed backend.
 
-**Sidebar target role source** (CB-06)
-`Sidebar.tsx` reads `targetRole` from Clerk `publicMetadata`, which the app never writes, instead of from the saved profile.
+**Reminders**
+The reminder email HTML does not escape user text, `PUT /api/reminders/:id` does not reset `isSent`, and the client helpers `updateReminder` and `deleteReminder` (and the `Reminder` type) are defined in the frontend but unused. There is no list-reminders endpoint, so the UI cannot show, edit or delete existing reminders.
 
-**GET analysis returns `suggestions` as a string** (CB-07)
-`GET /api/ai/resume-analysis/:appId` does not parse `suggestions`; `POST /api/ai/analyze-resume` does.
-
-**Reminders** (CB-08, CB-09, CB-10, CB-13)
-The Reminder tab text promises update and delete controls that do not exist, the email HTML does not escape user text, `PUT /api/reminders/:id` does not reset `isSent`, and the client helpers `updateReminder` and `deleteReminder` are unused.
-
-**Unused backend packages and a personal ngrok host** (CB-11)
+**Unused backend packages and a personal ngrok host**
 `axios`, `jsonwebtoken`, `@types/jsonwebtoken` and `@types/pdf-parse` are not used by the backend source, and `frontend/next.config.ts` lists a personal ngrok host in `allowedDevOrigins`.
 
-**Stale comments and placeholder page** (CB-12, CB-14, CB-15)
-Comments in the applications page cite a nonexistent `docs/context.md`, `getProfileController` has an effectively unreachable 404 branch, and the home page is a placeholder.
+**Unreachable branch and the sign-up route**
+`getProfileController` has a `404 User not found` branch that `requireUser` makes unreachable. `/sign-up(.*)` is a public route in `frontend/middleware.ts`, but the frontend has no sign-up page; how new users register was not verified.
+
+**Next.js middleware file convention**
+`next build` warns that the `middleware` file convention is deprecated in Next.js 16 in favor of `proxy`. `frontend/middleware.ts` still works but uses the old name.
 
 **resumeText stored as raw extracted text**
 The text extracted from PDFs includes spacing artifacts and layout noise from the PDF engine. This is sent directly to Gemini without cleaning. It works in practice but cleaner text would produce better AI results.

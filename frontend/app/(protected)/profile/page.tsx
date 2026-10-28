@@ -1,8 +1,23 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
+import { Eye, FileText, Lock, RefreshCw, Upload } from "lucide-react"
 import Skeleton from "../../components/Skeleton"
+import Avatar from "../../components/ui/Avatar"
+import Button from "../../components/ui/Button"
+import Eyebrow from "../../components/ui/Eyebrow"
+import { FieldError, FieldHint, Input, Label } from "../../components/ui/Field"
 import { useProfile, useUpdateProfile, useUploadResume } from "../../lib/queries"
+import { buttonStyles } from "../../components/ui/Button"
+import { cn } from "../../lib/cn"
+
+function resumeFileName(url: string) {
+  try {
+    return decodeURIComponent(new URL(url).pathname.split("/").pop() || "resume.pdf")
+  } catch {
+    return "resume.pdf"
+  }
+}
 
 export default function ProfilePage() {
   const profileQuery = useProfile()
@@ -15,23 +30,23 @@ export default function ProfilePage() {
   const [name, setName] = useState("")
   const [targetRole, setTargetRole] = useState("")
   const [experienceLevel, setExperienceLevel] = useState("")
+  const [initializedFor, setInitializedFor] = useState<string | null>(null)
   const [profileSaved, setProfileSaved] = useState(false)
   const [profileError, setProfileError] = useState<string | null>(null)
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState(false)
+  const [replaceWarningOpen, setReplaceWarningOpen] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const initializedProfileId = useRef<string | null>(null)
 
-  useEffect(() => {
-    if (!profile || initializedProfileId.current === profile.id) return
-    initializedProfileId.current = profile.id
+  // Initialize the fields once per fetched profile, so a refetch never overwrites typing.
+  if (profile && initializedFor !== profile.id) {
+    setInitializedFor(profile.id)
     setName(profile.name ?? "")
     setTargetRole(profile.targetRole ?? "")
     setExperienceLevel(profile.experienceLevel ?? "")
-  }, [profile])
+  }
 
   const handleSaveProfile = async () => {
     setProfileError(null)
@@ -39,12 +54,12 @@ export default function ProfilePage() {
     try {
       await updateProfile.mutateAsync({ name, targetRole, experienceLevel })
       setProfileSaved(true)
-    } catch (err: any) {
-      setProfileError(err.message)
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : String(err))
     }
   }
 
-  const handleUploadResume = async () => {
+  const handleUploadResume = async (selectedFile: File | null) => {
     setUploadError(null)
     setUploadSuccess(false)
 
@@ -59,17 +74,18 @@ export default function ProfilePage() {
 
     try {
       await uploadResume.mutateAsync(selectedFile)
-      setSelectedFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ""
       setUploadSuccess(true)
-    } catch (err: any) {
-      setUploadError(err.message)
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err))
     }
   }
 
+  const openFilePicker = () => fileInputRef.current?.click()
+
   if (loading) {
     return (
-      <div className="p-10 max-w-[900px] flex flex-col gap-6">
+      <div className="flex max-w-[720px] flex-col gap-6">
         <Skeleton className="h-8 w-32" />
         <Skeleton className="h-72 w-full" />
         <Skeleton className="h-64 w-full" />
@@ -78,171 +94,230 @@ export default function ProfilePage() {
   }
 
   if (error) {
-    return (
-      <div className="p-8 text-[#EF4444] text-sm">{error}</div>
-    )
+    return <div className="text-sm text-danger">{error}</div>
   }
 
   if (!profile) {
-    return (
-      <div className="p-8 text-[#6B7280] text-sm">Profile not found.</div>
-    )
+    return <div className="text-sm text-muted">Profile not found.</div>
   }
 
+  const uploading = uploadResume.isPending
+
   return (
-    <div className="p-10 max-w-[900px]">
+    <div className="max-w-[720px]">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf"
+        onChange={(e) => handleUploadResume(e.target.files?.[0] ?? null)}
+        className="hidden"
+      />
 
       {/* Header */}
-      <div className="mb-7">
-        <h1 className="text-2xl font-bold text-[#111827]">Profile</h1>
-        <p className="text-sm text-[#6B7280] mt-1.5">Your name and job search preferences.</p>
-      </div>
+      <header>
+        <h1 className="m-0 text-[32px] font-semibold leading-[1.15] tracking-[-0.03em]">
+          Profile
+        </h1>
+        <p className="m-0 mt-2 text-[15px] text-body">
+          Your details and the resume used for AI fit.
+        </p>
+      </header>
 
-      {/* Profile info card */}
-      <div className="bg-white border border-[#E5E7EB] rounded-xl p-8">
-        <div className="flex flex-col gap-5">
+      {/* You */}
+      <section className="mt-8">
+        <Eyebrow className="border-b border-line pb-2.5">You</Eyebrow>
+        <div className="mt-5 flex items-center gap-3.5">
+          <Avatar name={profile.name || profile.email} src={profile.profilePicture} size={48} fontSize={17} />
+          <div className="min-w-0">
+            <div className="truncate text-base font-semibold">{profile.name}</div>
+            <div className="mt-0.5 truncate text-sm text-body">{profile.email}</div>
+            <div className="mt-0.5 flex items-center gap-[5px] text-xs text-muted">
+              <Lock size={11} aria-hidden="true" />
+              Managed by your Google sign-in
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">
           <div>
-            <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-              Name
-            </label>
-            <input
+            <Label htmlFor="profile-name">Name</Label>
+            <Input
+              id="profile-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full text-sm text-[#111827] bg-white border border-[#E5E7EB] rounded-lg px-3.5 py-2.5 outline-none transition-colors focus:border-[#FF6B35] focus:ring-4 focus:ring-[#FF6B35]/10"
             />
           </div>
-
           <div>
-            <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-              Target Role
-            </label>
-            <input
+            <Label htmlFor="profile-role">Target Role</Label>
+            <Input
+              id="profile-role"
               type="text"
               value={targetRole}
               onChange={(e) => setTargetRole(e.target.value)}
               placeholder="e.g. Backend Engineer"
-              className="w-full text-sm text-[#111827] placeholder-[#9CA3AF] bg-white border border-[#E5E7EB] rounded-lg px-3.5 py-2.5 outline-none transition-colors focus:border-[#FF6B35] focus:ring-4 focus:ring-[#FF6B35]/10"
             />
           </div>
-
           <div>
-            <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-              Experience Level
-            </label>
-            <input
+            <Label htmlFor="profile-level">Experience Level</Label>
+            <Input
+              id="profile-level"
               type="text"
               value={experienceLevel}
               onChange={(e) => setExperienceLevel(e.target.value)}
               placeholder="e.g. Fresher"
-              className="w-full text-sm text-[#111827] placeholder-[#9CA3AF] bg-white border border-[#E5E7EB] rounded-lg px-3.5 py-2.5 outline-none transition-colors focus:border-[#FF6B35] focus:ring-4 focus:ring-[#FF6B35]/10"
             />
           </div>
         </div>
 
-        <div className="mt-7">
-          <button
-            onClick={handleSaveProfile}
-            disabled={updateProfile.isPending}
-            className="bg-[#FF6B35] hover:bg-[#E85A2A] text-white text-sm font-semibold rounded-lg px-[22px] py-[11px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {updateProfile.isPending ? "Saving..." : "Save Profile"}
-          </button>
+        <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
           {profileSaved && (
-            <p className="mt-3 text-sm text-[#16A34A]">Profile saved.</p>
+            <span role="status" className="font-mono text-mono tracking-[0.06em] text-success">
+              Profile saved.
+            </span>
           )}
-          {profileError && (
-            <p className="mt-3 text-sm text-[#EF4444]">{profileError}</p>
-          )}
+          {profileError && <FieldError>{profileError}</FieldError>}
+          <Button size="cta" onClick={handleSaveProfile} disabled={updateProfile.isPending}>
+            {updateProfile.isPending ? "Saving..." : "Save Profile"}
+          </Button>
         </div>
-      </div>
+      </section>
 
-      {/* Resume card */}
-      <div className="bg-white border border-[#E5E7EB] rounded-xl p-8 mt-6">
-        <div className="mb-6">
-          <h2 className="text-lg font-bold text-[#111827] mb-1">Resume</h2>
-          <p className="text-[13px] text-[#6B7280]">
-            Upload your resume once. It will be used for AI resume analysis on any application.
-          </p>
-        </div>
+      {/* Resume */}
+      <section className="mt-10">
+        <Eyebrow className="border-b border-line pb-2.5">Resume</Eyebrow>
 
-        {/* Current resume state */}
         {profile.resumeUrl ? (
-          <div className="flex items-center gap-3.5 mb-6 p-4 bg-[#FFF8F5] border border-[#FFD9C7] rounded-[10px]">
-            <div className="w-[30px] h-[30px] flex-shrink-0 rounded-full bg-[#FF6B35] flex items-center justify-center">
-              <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
+          <div className="relative mt-5 rounded-card border border-line bg-surface p-4 shadow-card">
+            <div className="flex flex-wrap items-center gap-3.5">
+              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-btn bg-brand-tint-bg text-brand">
+                <FileText size={20} aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="m-0 truncate text-sm font-medium">
+                  {uploading ? "Uploading…" : resumeFileName(profile.resumeUrl)}
+                </p>
+                <p className="m-0 mt-1 font-mono text-mono uppercase tracking-[0.06em] text-muted">
+                  PDF
+                </p>
+              </div>
+              <div className="relative flex items-center gap-2">
+                <a
+                  href={profile.resumeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-disabled={uploading}
+                  className={buttonStyles({
+                    variant: "outline",
+                    size: "none",
+                    className: cn(
+                      "h-[34px] gap-1.5 rounded-ctl px-3 text-sm2",
+                      uploading && "pointer-events-none opacity-50"
+                    ),
+                  })}
+                >
+                  <Eye size={14} />
+                  View
+                </a>
+                <Button
+                  variant="outline"
+                  size="none"
+                  className="h-[34px] gap-1.5 rounded-ctl px-3 text-sm2"
+                  disabled={uploading}
+                  onClick={() => setReplaceWarningOpen((o) => !o)}
+                  aria-haspopup="dialog"
+                  aria-expanded={replaceWarningOpen}
+                >
+                  <RefreshCw size={14} />
+                  Replace
+                </Button>
+
+                {replaceWarningOpen && (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      onClick={() => setReplaceWarningOpen(false)}
+                      className="fixed inset-0 z-20 cursor-default"
+                    />
+                    <div
+                      role="dialog"
+                      aria-labelledby="replace-title"
+                      className="absolute right-0 top-[calc(100%+8px)] z-30 w-80 max-w-[calc(100vw-48px)] rounded-card border border-line bg-surface p-4 shadow-pop"
+                    >
+                      <div id="replace-title" className="text-sm font-semibold">
+                        Replace your resume?
+                      </div>
+                      <p className="m-0 mt-1.5 text-sm2 leading-normal text-body">
+                        Saved AI fit results for your applications will be cleared. You can
+                        re-analyze any application afterwards.
+                      </p>
+                      <div className="mt-3.5 flex justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setReplaceWarningOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setReplaceWarningOpen(false)
+                            openFilePicker()
+                          }}
+                        >
+                          Choose new PDF
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-semibold text-[#111827] mb-0.5">Resume uploaded</p>
-              <a
-                href={profile.resumeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[13px] font-medium text-[#6B7280] underline hover:text-[#111827] transition-colors"
+            {uploading && (
+              <div
+                aria-hidden="true"
+                className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden rounded-b-card"
               >
-                View current resume
-              </a>
-            </div>
+                <div className="h-full w-2/3 animate-pulse bg-brand-logo" />
+              </div>
+            )}
           </div>
         ) : (
-          <div className="mb-6 p-4 bg-[#F9FAFB] border border-dashed border-[#D1D5DB] rounded-[10px]">
-            <p className="text-sm text-[#6B7280]">No resume uploaded yet.</p>
-            <p className="text-xs text-[#9CA3AF] mt-1">
-              Upload a resume to unlock AI resume analysis on your applications.
-            </p>
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              handleUploadResume(e.dataTransfer.files?.[0] ?? null)
+            }}
+            className="relative mt-5 flex flex-col items-center gap-1.5 rounded-card border-[1.5px] border-dashed border-line-dashed p-7 text-center"
+          >
+            <Upload size={22} className="text-brand" aria-hidden="true" />
+            <div className="mt-1 text-sm font-semibold">Upload your resume</div>
+            <div className="text-sm2 text-muted">
+              Unlocks AI resume fit on your applications. PDF only, up to 5 MB.
+            </div>
+            <Button size="cta" className="mt-2.5" onClick={openFilePicker} disabled={uploading}>
+              {uploading ? "Uploading..." : "Choose PDF"}
+            </Button>
+            {uploading && (
+              <div
+                aria-hidden="true"
+                className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden rounded-b-card"
+              >
+                <div className="h-full w-2/3 animate-pulse bg-brand-logo" />
+              </div>
+            )}
           </div>
         )}
 
-        {/* Upload controls */}
-        <div>
-          <label className="block text-[13px] font-medium text-[#111827] mb-[7px]">
-            {profile.resumeUrl ? "Replace resume" : "Upload resume"}
-          </label>
-          <div className="flex items-center gap-3 border border-[#E5E7EB] rounded-lg py-2 pl-3.5 pr-2 max-w-[480px]">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex-shrink-0 bg-[#F3F4F6] border border-[#E5E7EB] hover:bg-[#E9EAEC] rounded-md px-3.5 py-[7px] text-[13px] font-medium text-[#111827] transition-colors"
-            >
-              Choose File
-            </button>
-            <span className="text-[13px] text-[#6B7280] flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-              {selectedFile ? selectedFile.name : "No file chosen"}
-            </span>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              onChange={(e) => {
-                setUploadError(null)
-                setUploadSuccess(false)
-                setSelectedFile(e.target.files?.[0] ?? null)
-              }}
-              className="hidden"
-            />
-          </div>
-        </div>
-
-        <div className="mt-7">
-          <button
-            onClick={handleUploadResume}
-            disabled={uploadResume.isPending}
-            className="bg-[#FF6B35] hover:bg-[#E85A2A] text-white text-sm font-semibold rounded-lg px-[22px] py-[11px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {uploadResume.isPending ? "Uploading..." : "Upload"}
-          </button>
-
-          {uploadSuccess && (
-            <p className="mt-3 text-sm text-[#16A34A]">Resume uploaded successfully.</p>
-          )}
-          {uploadError && (
-            <p className="mt-3 text-sm text-[#EF4444]">{uploadError}</p>
-          )}
-        </div>
-      </div>
-
+        {uploadError && <FieldError className="mt-2">{uploadError}</FieldError>}
+        {uploadSuccess && (
+          <p role="status" className="m-0 mt-2 font-mono text-mono tracking-[0.06em] text-success">
+            Resume uploaded successfully.
+          </p>
+        )}
+        <FieldHint className="mt-2.5">
+          PDF only, up to 5 MB. This resume is used for AI fit on every application.
+        </FieldHint>
+      </section>
     </div>
   )
 }
